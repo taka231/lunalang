@@ -160,3 +160,9 @@ fn test_fixity_resolution() {
         )
     )
 }
+
+pub fn parser_expr<'a>(input: &'a str, hashmap: &HashMap<String, i64>) -> IResult<&'a str, Expr> {
+    let (input, expr) = expr_op(input)?;
+    let expr_ = fixity_resolution(expr, hashmap);
+    Ok((input, expr_))
+}
