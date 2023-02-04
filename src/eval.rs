@@ -36,18 +36,9 @@ impl Eval {
 
 #[test]
 fn test_eval_expr() {
-    use crate::parser::parser_expr;
-    use std::collections::HashMap;
+    use crate::parser::{parser_expr, PRIORITY_HASHMAP};
     fn test_eval_expr_helper(str: &str, v: Result<Value, &str>) {
-        let hashmap: HashMap<_, _> = vec![
-            ("+".to_string(), 6),
-            ("-".to_string(), 6),
-            ("*".to_string(), 7),
-            ("/".to_string(), 7),
-        ]
-        .iter()
-        .map(|x| x.clone())
-        .collect();
+        let hashmap = &PRIORITY_HASHMAP;
         let eval = Eval::new();
         assert_eq!(eval.eval_expr(parser_expr(str, &hashmap).unwrap().1), v)
     }

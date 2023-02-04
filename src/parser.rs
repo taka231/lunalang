@@ -1,5 +1,3 @@
-use std::collections::{HashMap, HashSet};
-
 use crate::ast::{self, e_bin_op, e_int, Expr};
 use nom::{
     branch::alt,
@@ -11,6 +9,8 @@ use nom::{
     sequence::delimited,
     IResult,
 };
+use once_cell::sync::Lazy;
+use std::collections::{HashMap, HashSet};
 
 /// A combinator that takes a parser `inner` and produces a parser that also consumes both leading and
 /// trailing whitespace, returning the output of `inner`.
@@ -123,9 +123,8 @@ pub fn fixity_resolution(ast: Expr, map: &HashMap<String, i64>) -> Expr {
     }
 }
 
-#[test]
-fn test_fixity_resolution() {
-    let map: HashMap<_, _> = vec![
+pub static PRIORITY_HASHMAP: Lazy<HashMap<String, i64>> = Lazy::new(|| {
+    vec![
         ("+".to_string(), 6),
         ("-".to_string(), 6),
         ("*".to_string(), 7),
@@ -133,7 +132,12 @@ fn test_fixity_resolution() {
     ]
     .iter()
     .map(|x| x.clone())
-    .collect();
+    .collect()
+});
+
+#[test]
+fn test_fixity_resolution() {
+    let map = &PRIORITY_HASHMAP;
     let test1 = e_bin_op("*", e_bin_op("+", e_int(1), e_int(2)), e_int(3));
     assert_eq!(
         fixity_resolution(test1, &map),
