@@ -1,0 +1,47 @@
+use crate::ast::Expr;
+#[derive(Eq, PartialEq, Debug, Clone)]
+pub enum Value {
+    VInt(i64),
+}
+
+fn v_int(n: i64) -> Value {
+    Value::VInt(n)
+}
+
+pub struct Eval {}
+
+impl Eval {
+    pub fn new() -> Eval {
+        Eval {}
+    }
+    pub fn eval_expr(&self, ast: Expr) -> Result<Value, &str> {
+        match ast {
+            Expr::EBinOp(op, e1, e2) => {
+                let v1 = self.eval_expr(*e1)?;
+                let v2 = self.eval_expr(*e2)?;
+                match (v1, v2) {
+                    (Value::VInt(n1), Value::VInt(n2)) => match &op as &str {
+                        "+" => Ok(v_int(n1 + n2)),
+                        "-" => Ok(v_int(n1 - n2)),
+                        "*" => Ok(v_int(n1 * n2)),
+                        "/" => Ok(v_int(n1 / n2)),
+                        _ => Err("unimplemented operator"),
+                    },
+                }
+            }
+            Expr::EInt(n) => Ok(v_int(n)),
+        }
+    }
+}
+
+#[test]
+fn test_eval_expr() {
+    use crate::parser::parser_expr;
+    fn test_eval_expr_helper(str: &str, v: Result<Value, &str>) {
+        let eval = Eval::new();
+        assert_eq!(eval.eval_expr(parser_expr(str).unwrap().1), v)
+    }
+    test_eval_expr_helper("3*3+4*4", Ok(v_int(25)));
+    test_eval_expr_helper("4+(6/3)-2", Ok(v_int(4)));
+    test_eval_expr_helper("2+4/2/2", Ok(v_int(3)))
+}
