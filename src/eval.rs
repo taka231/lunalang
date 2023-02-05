@@ -36,11 +36,10 @@ impl Eval {
 
 #[test]
 fn test_eval_expr() {
-    use crate::parser::{parser_expr, PRIORITY_HASHMAP};
+    use crate::parser::parser_expr;
     fn test_eval_expr_helper(str: &str, v: Result<Value, &str>) {
-        let hashmap = &PRIORITY_HASHMAP;
         let eval = Eval::new();
-        assert_eq!(eval.eval_expr(parser_expr(str, &hashmap).unwrap().1), v)
+        assert_eq!(eval.eval_expr(parser_expr(str).unwrap().1), v)
     }
     test_eval_expr_helper("3*3+4*4", Ok(v_int(25)));
     test_eval_expr_helper("4+(6/3)-2", Ok(v_int(4)));

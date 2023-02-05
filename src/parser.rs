@@ -3,7 +3,7 @@ use nom::{
     branch::alt,
     bytes::complete::tag,
     character::complete::{digit1, multispace0, one_of, satisfy},
-    combinator::{map_res, value},
+    combinator::{fail, map_res, value},
     error::ParseError,
     multi::{many0, many1},
     sequence::delimited,
@@ -54,14 +54,28 @@ pub fn op(input: &str) -> IResult<&str, String> {
 }
 
 pub fn term(input: &str) -> IResult<&str, Expr> {
-    alt((expr_int, delimited(symbol("("), expr_op, symbol(")"))))(input)
+    alt((expr_int, delimited(symbol("("), expr_op_6l, symbol(")"))))(input)
 }
 
-pub fn expr_op(input: &str) -> IResult<&str, Expr> {
+pub fn expr_op_7l(input: &str) -> IResult<&str, Expr> {
     let (input, e1) = term(input)?;
     let (input, e2) = many0(|input| {
-        let (input, op) = op(input)?;
+        let (input, op) = alt((tag("*"), tag("/")))(input)?;
         let (input, ex) = term(input)?;
+        Ok((input, (op, ex)))
+    })(input)?;
+    Ok((
+        input,
+        e2.iter()
+            .fold(e1, |acc, (op, ex)| e_bin_op(&op, acc, ex.clone())),
+    ))
+}
+
+pub fn expr_op_6l(input: &str) -> IResult<&str, Expr> {
+    let (input, e1) = expr_op_7l(input)?;
+    let (input, e2) = many0(|input| {
+        let (input, op) = alt((tag("+"), tag("-")))(input)?;
+        let (input, ex) = expr_op_7l(input)?;
         Ok((input, (op, ex)))
     })(input)?;
     Ok((
@@ -74,18 +88,18 @@ pub fn expr_op(input: &str) -> IResult<&str, Expr> {
 #[test]
 fn test_expr_op() {
     assert_eq!(
-        expr_op("1 + 1"),
+        expr_op_6l("1 + 1"),
         Ok(("", e_bin_op("+", e_int(1), e_int(1))))
     );
     assert_eq!(
-        expr_op("1 + 1 * 1"),
+        expr_op_6l("1 + 1 * 1"),
         Ok((
             "",
-            e_bin_op("*", e_bin_op("+", e_int(1), e_int(1)), e_int(1))
+            e_bin_op("+", e_int(1), e_bin_op("*", e_int(1), e_int(1)))
         ))
     );
     assert_eq!(
-        expr_op("1 + (2 * 3)"),
+        expr_op_6l("1 + (2 * 3)"),
         Ok((
             "",
             e_bin_op("+", e_int(1), e_bin_op("*", e_int(2), e_int(3)))
@@ -93,80 +107,7 @@ fn test_expr_op() {
     )
 }
 
-pub fn fixity_resolution(ast: Expr, map: &HashMap<String, i64>) -> Expr {
-    match ast {
-        Expr::EBinOp(op1, e1, e2) => match *e1 {
-            Expr::EBinOp(op2, e3, e4) => {
-                let pri1 = map[&op1];
-                let pri2 = map[&op2];
-                if pri1 <= pri2 {
-                    e_bin_op(
-                        &op1,
-                        fixity_resolution(e_bin_op(&op2, *e3, *e4), map),
-                        fixity_resolution(*e2, map),
-                    )
-                } else {
-                    e_bin_op(
-                        &op2,
-                        fixity_resolution(*e3, map),
-                        fixity_resolution(e_bin_op(&op1, *e4, *e2), map),
-                    )
-                }
-            }
-            e => {
-                let e_ = fixity_resolution(e, map);
-                let e2_ = fixity_resolution(*e2, map);
-                e_bin_op(&op1, e_, e2_)
-            }
-        },
-        Expr::EInt(n) => e_int(n),
-    }
-}
-
-pub static PRIORITY_HASHMAP: Lazy<HashMap<String, i64>> = Lazy::new(|| {
-    vec![
-        ("+".to_string(), 6),
-        ("-".to_string(), 6),
-        ("*".to_string(), 7),
-        ("/".to_string(), 7),
-    ]
-    .iter()
-    .map(|x| x.clone())
-    .collect()
-});
-
-#[test]
-fn test_fixity_resolution() {
-    let map = &PRIORITY_HASHMAP;
-    let test1 = e_bin_op("*", e_bin_op("+", e_int(1), e_int(2)), e_int(3));
-    assert_eq!(
-        fixity_resolution(test1, &map),
-        e_bin_op("+", e_int(1), e_bin_op("*", e_int(2), e_int(3)))
-    );
-    assert_eq!(
-        fixity_resolution(expr_op("3*1+4/2").unwrap().1, &map),
-        e_bin_op(
-            "+",
-            e_bin_op("*", e_int(3), e_int(1)),
-            e_bin_op("/", e_int(4), e_int(2))
-        )
-    );
-    assert_eq!(
-        fixity_resolution(expr_op("3+4-2").unwrap().1, &map),
-        e_bin_op("-", e_bin_op("+", e_int(3), e_int(4)), e_int(2))
-    );
-    assert_eq!(
-        fixity_resolution(expr_op("3 * (1 + 4) / 2").unwrap().1, &map),
-        e_bin_op(
-            "/",
-            e_bin_op("*", e_int(3), e_bin_op("+", e_int(1), e_int(4))),
-            e_int(2)
-        )
-    )
-}
-
-pub fn parser_expr<'a>(input: &'a str, hashmap: &HashMap<String, i64>) -> IResult<&'a str, Expr> {
-    let (input, expr) = expr_op(input)?;
-    let expr_ = fixity_resolution(expr, hashmap);
-    Ok((input, expr_))
+pub fn parser_expr<'a>(input: &'a str) -> IResult<&'a str, Expr> {
+    let (input, expr) = expr_op_6l(input)?;
+    Ok((input, expr))
 }

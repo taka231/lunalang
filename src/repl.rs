@@ -1,6 +1,6 @@
 use crate::ast::Expr;
 use crate::eval::{Eval, Value};
-use crate::parser::{parser_expr, PRIORITY_HASHMAP};
+use crate::parser::parser_expr;
 use std::io;
 pub fn repl() {
     println!("Welcome to lunalang repl!");
@@ -13,7 +13,7 @@ pub fn repl() {
         if program == ":q\n" {
             break;
         }
-        let ast = parser_expr(&program, &PRIORITY_HASHMAP);
+        let ast = parser_expr(&program);
         match ast {
             Ok((_, ast)) => {
                 let result = eval.eval_expr(ast);
