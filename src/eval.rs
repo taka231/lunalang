@@ -44,4 +44,5 @@ fn test_eval_expr() {
     }
     test_eval_expr_helper("3*3+4*4", Ok(v_int(25)));
     test_eval_expr_helper("4+(6/3)-2", Ok(v_int(4)));
+    test_eval_expr_helper("2+4/2/2", Ok(v_int(3)))
 }
