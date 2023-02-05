@@ -1,3 +1,4 @@
+use lunalang::repl::repl;
 fn main() {
-    println!("Hello, world!");
+    repl();
 }

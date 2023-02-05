@@ -11,10 +11,10 @@ fn v_int(n: i64) -> Value {
 pub struct Eval {}
 
 impl Eval {
-    fn new() -> Eval {
+    pub fn new() -> Eval {
         Eval {}
     }
-    fn eval_expr(&self, ast: Expr) -> Result<Value, &str> {
+    pub fn eval_expr(&self, ast: Expr) -> Result<Value, &str> {
         match ast {
             Expr::EBinOp(op, e1, e2) => {
                 let v1 = self.eval_expr(*e1)?;
