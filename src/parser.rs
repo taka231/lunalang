@@ -1,9 +1,9 @@
-use crate::ast::{self, e_bin_op, e_int, Expr};
+use crate::ast::{self, e_bin_op, e_if, e_int, Expr};
 use nom::{
     branch::alt,
     bytes::complete::tag,
     character::complete::{digit1, multispace0, one_of, satisfy},
-    combinator::{fail, map_res, value},
+    combinator::{fail, map_res, opt, value},
     error::ParseError,
     multi::{many0, many1},
     sequence::delimited,
@@ -54,7 +54,11 @@ pub fn op(input: &str) -> IResult<&str, String> {
 }
 
 pub fn term(input: &str) -> IResult<&str, Expr> {
-    alt((expr_int, delimited(symbol("("), expr_op_6l, symbol(")"))))(input)
+    alt((
+        expr_int,
+        delimited(symbol("("), expr_op_4n, symbol(")")),
+        expr_if,
+    ))(input)
 }
 
 pub fn expr_op_7l(input: &str) -> IResult<&str, Expr> {
@@ -85,29 +89,76 @@ pub fn expr_op_6l(input: &str) -> IResult<&str, Expr> {
     ))
 }
 
+pub fn expr_op_4n(input: &str) -> IResult<&str, Expr> {
+    let (input, e1) = expr_op_6l(input)?;
+    let (input, optional) = opt(|input| {
+        let (input, op) = alt((
+            tag("=="),
+            tag("!="),
+            tag("<="),
+            tag("<"),
+            tag(">="),
+            tag(">"),
+        ))(input)?;
+        let (input, e2) = expr_op_6l(input)?;
+        Ok((input, (op, e2)))
+    })(input)?;
+    match optional {
+        Some((op, e2)) => Ok((input, e_bin_op(op, e1, e2))),
+        None => Ok((input, e1)),
+    }
+}
+
 #[test]
 fn test_expr_op() {
     assert_eq!(
-        expr_op_6l("1 + 1"),
+        parser_expr("1 + 1"),
         Ok(("", e_bin_op("+", e_int(1), e_int(1))))
     );
     assert_eq!(
-        expr_op_6l("1 + 1 * 1"),
+        parser_expr("1 + 1 * 1"),
         Ok((
             "",
             e_bin_op("+", e_int(1), e_bin_op("*", e_int(1), e_int(1)))
         ))
     );
     assert_eq!(
-        expr_op_6l("1 + (2 * 3)"),
+        parser_expr("1 + (2 * 3)"),
         Ok((
             "",
             e_bin_op("+", e_int(1), e_bin_op("*", e_int(2), e_int(3)))
         ))
+    );
+    assert_eq!(
+        parser_expr("1<2"),
+        Ok(("", e_bin_op("<", e_int(1), e_int(2))))
+    );
+    assert_eq!(
+        parser_expr("1<1+1"),
+        Ok((
+            "",
+            e_bin_op("<", e_int(1), e_bin_op("+", e_int(1), e_int(1)))
+        ))
+    );
+    assert_eq!(
+        parser_expr("if (1<2) 1 else 2"),
+        Ok((
+            "",
+            e_if(e_bin_op("<", e_int(1), e_int(2)), e_int(1), e_int(2))
+        ))
     )
 }
 
+pub fn expr_if(input: &str) -> IResult<&str, Expr> {
+    let (input, _) = symbol("if")(input)?;
+    let (input, cond) = delimited(symbol("("), parser_expr, symbol(")"))(input)?;
+    let (input, e1) = parser_expr(input)?;
+    let (input, _) = symbol("else")(input)?;
+    let (input, e2) = parser_expr(input)?;
+    Ok((input, e_if(cond, e1, e2)))
+}
+
 pub fn parser_expr<'a>(input: &'a str) -> IResult<&'a str, Expr> {
-    let (input, expr) = expr_op_6l(input)?;
+    let (input, expr) = expr_op_4n(input)?;
     Ok((input, expr))
 }
