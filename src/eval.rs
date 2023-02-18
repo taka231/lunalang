@@ -42,7 +42,14 @@ impl Eval {
                 }
             }
             Expr::EInt(n) => Ok(v_int(n)),
-            Expr::EIf(cond, e1, e2) => unimplemented!(),
+            Expr::EIf(cond, e1, e2) => {
+                let cond = self.eval_expr(*cond)?;
+                match cond {
+                    Value::VBool(true) => self.eval_expr(*e1),
+                    Value::VBool(false) => self.eval_expr(*e2),
+                    _ => Err("type error".to_string()),
+                }
+            }
         }
     }
 }
@@ -63,4 +70,7 @@ fn test_eval_expr() {
     test_eval_expr_helper("2<=3", Ok(v_bool(true)));
     test_eval_expr_helper("2==3", Ok(v_bool(false)));
     test_eval_expr_helper("2!=3", Ok(v_bool(true)));
+    test_eval_expr_helper("if (3>2) 1 else 2", Ok(v_int(1)));
+    test_eval_expr_helper("if (3<2) 1 else 2", Ok(v_int(2)));
+    test_eval_expr_helper("if (3<2) 1 else if (4==4) 2 else 3", Ok(v_int(2)));
 }
