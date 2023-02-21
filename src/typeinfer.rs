@@ -1,4 +1,5 @@
 use crate::ast::Expr;
+use crate::error::TypeInferError;
 use std::fmt;
 use std::{borrow::Borrow, cell::RefCell, fmt::Display, rc::Rc};
 
@@ -22,7 +23,7 @@ impl Display for Type {
     }
 }
 
-pub fn typeinfer_expr(ast: &Expr) -> Result<Type, String> {
+pub fn typeinfer_expr(ast: &Expr) -> Result<Type, TypeInferError> {
     match ast {
         Expr::EInt(_) => Ok(Type::TInt),
         Expr::EBinOp(op, e1, e2) => match &op as &str {
@@ -36,7 +37,7 @@ pub fn typeinfer_expr(ast: &Expr) -> Result<Type, String> {
                 unify(Type::TInt, typeinfer_expr(e2)?)?;
                 Ok(Type::TBool)
             }
-            _ => Err("unimplemented operator".to_string()),
+            _ => Err(TypeInferError::UnimplementedOperatorError(op.clone())),
         },
         Expr::EIf(cond, e1, e2) => {
             unify(Type::TBool, typeinfer_expr(cond)?)?;
@@ -64,11 +65,11 @@ fn typeinfer_expr_test() {
     );
     assert_eq!(
         typeinfer_expr(&parser_expr("if (3>2) 1 else 3>2").unwrap().1),
-        Err("unify error!".to_string())
+        Err(TypeInferError::UnifyError(Type::TInt, Type::TBool))
     );
 }
 
-fn unify(t1: Type, t2: Type) -> Result<(), String> {
+fn unify(t1: Type, t2: Type) -> Result<(), TypeInferError> {
     match (t1, t2) {
         (t1, t2) if t1 == t2 => Ok(()),
         (Type::TVar(n1, _), Type::TVar(n2, _)) if n1 == n2 => Ok(()),
@@ -76,7 +77,7 @@ fn unify(t1: Type, t2: Type) -> Result<(), String> {
         (t1, Type::TVar(_, t2)) if (*t2).borrow().is_some() => unify(t1, unwrap_all(t2)),
         (Type::TVar(n1, t1), t2) => {
             if occur(n1, t2.clone()) {
-                Err("occur error!".to_string())
+                Err(TypeInferError::OccurError(n1, t2))
             } else {
                 *(*t1).borrow_mut() = Some(t2);
                 Ok(())
@@ -84,13 +85,13 @@ fn unify(t1: Type, t2: Type) -> Result<(), String> {
         }
         (t1, Type::TVar(n2, t2)) => {
             if occur(n2, t1.clone()) {
-                Err("occur error!".to_string())
+                Err(TypeInferError::OccurError(n2, t1))
             } else {
                 *(*t2).borrow_mut() = Some(t1);
                 Ok(())
             }
         }
-        (t1, t2) => Err("unify error!".to_string()),
+        (t1, t2) => Err(TypeInferError::UnifyError(t1, t2)),
     }
 }
 
