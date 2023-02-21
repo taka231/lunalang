@@ -28,7 +28,7 @@ pub fn repl() {
                     continue;
                 }
                 if is_typecheck {
-                    println!("{:?}", ty.unwrap());
+                    println!("{}", ty.unwrap());
                     continue;
                 }
                 let result = eval.eval_expr(ast);
