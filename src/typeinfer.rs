@@ -1,12 +1,25 @@
-use std::{borrow::Borrow, cell::RefCell, rc::Rc};
-
 use crate::ast::Expr;
+use std::fmt;
+use std::{borrow::Borrow, cell::RefCell, fmt::Display, rc::Rc};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Type {
     TInt,
     TBool,
     TVar(u64, Rc<RefCell<Option<Type>>>),
+}
+
+impl Display for Type {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Type::TInt => write!(f, "{}", "Int"),
+            Type::TBool => write!(f, "{}", "Bool"),
+            Type::TVar(n, t) => match *(**t).borrow() {
+                Some(ref t) => t.fmt(f),
+                None => write!(f, "{}", n),
+            },
+        }
+    }
 }
 
 pub fn typeinfer_expr(ast: &Expr) -> Result<Type, String> {
