@@ -7,6 +7,7 @@ pub trait Error {}
 pub enum TypeInferError {
     UnifyError(Type, Type),
     OccurError(u64, Type),
+    UnimplementedOperatorError(String),
 }
 
 impl Display for TypeInferError {
@@ -14,6 +15,7 @@ impl Display for TypeInferError {
         match self {
             Self::UnifyError(t1, t2) => write!(f, "Cannot unify {} to {}", t1, t2),
             Self::OccurError(n, t) => write!(f, "{} is occur in type {}", n, t),
+            Self::UnimplementedOperatorError(op) => write!(f, "{} is unimplemented", op),
         }
     }
 }
