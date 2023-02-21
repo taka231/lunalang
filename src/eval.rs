@@ -1,4 +1,5 @@
 use crate::ast::Expr;
+use crate::error::EvalError;
 #[derive(Eq, PartialEq, Debug, Clone)]
 pub enum Value {
     VInt(i64),
@@ -19,7 +20,7 @@ impl Eval {
     pub fn new() -> Eval {
         Eval {}
     }
-    pub fn eval_expr(&self, ast: Expr) -> Result<Value, String> {
+    pub fn eval_expr(&self, ast: Expr) -> Result<Value, EvalError> {
         match ast {
             Expr::EBinOp(op, e1, e2) => {
                 let v1 = self.eval_expr(*e1)?;
@@ -36,9 +37,9 @@ impl Eval {
                         ">=" => Ok(v_bool(n1 >= n2)),
                         "==" => Ok(v_bool(n1 == n2)),
                         "!=" => Ok(v_bool(n1 != n2)),
-                        _ => Err(format!("unimplemented operator {}", op)),
+                        _ => Err(EvalError::UnimplementedOperatorError(op)),
                     },
-                    (_, _) => Err("type error".to_string()),
+                    (_, _) => Err(EvalError::InternalTypeError),
                 }
             }
             Expr::EInt(n) => Ok(v_int(n)),
@@ -47,7 +48,7 @@ impl Eval {
                 match cond {
                     Value::VBool(true) => self.eval_expr(*e1),
                     Value::VBool(false) => self.eval_expr(*e2),
-                    _ => Err("type error".to_string()),
+                    _ => Err(EvalError::InternalTypeError),
                 }
             }
         }
@@ -57,7 +58,7 @@ impl Eval {
 #[test]
 fn test_eval_expr() {
     use crate::parser::parser_expr;
-    fn test_eval_expr_helper(str: &str, v: Result<Value, String>) {
+    fn test_eval_expr_helper(str: &str, v: Result<Value, EvalError>) {
         let eval = Eval::new();
         assert_eq!(eval.eval_expr(parser_expr(str).unwrap().1), v)
     }
