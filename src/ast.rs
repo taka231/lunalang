@@ -16,3 +16,8 @@ pub fn e_bin_op(str: &str, e1: Expr, e2: Expr) -> Expr {
 pub fn e_if(cond: Expr, e1: Expr, e2: Expr) -> Expr {
     Expr::EIf(Box::new(cond), Box::new(e1), Box::new(e2))
 }
+
+#[derive(PartialEq, Eq, Debug, Clone)]
+pub enum Statement {
+    Assign(String, Expr),
+}
