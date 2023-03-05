@@ -21,3 +21,5 @@ pub fn e_if(cond: Expr, e1: Expr, e2: Expr) -> Expr {
 pub enum Statement {
     Assign(String, Expr),
 }
+
+type Statements = Vec<Statement>;
