@@ -24,6 +24,7 @@ impl Display for TypeInferError {
 pub enum EvalError {
     InternalTypeError,
     UnimplementedOperatorError(String),
+    UndefinedVariable(String),
 }
 
 impl Display for EvalError {
@@ -31,6 +32,7 @@ impl Display for EvalError {
         match self {
             Self::InternalTypeError => write!(f, "InternalTypeError"),
             Self::UnimplementedOperatorError(op) => write!(f, "{} is unimplemented", op),
+            Self::UndefinedVariable(var) => write!(f, "{} is a undefined variable", var),
         }
     }
 }
