@@ -2,11 +2,13 @@ use crate::ast::Expr;
 use crate::eval::{Eval, Value};
 use crate::parser::parser_expr;
 use crate::typeinfer::typeinfer_expr;
-use std::io;
+use std::io::{self, Write};
 pub fn repl() {
     println!("Welcome to lunalang repl!");
     let eval = Eval::new();
     loop {
+        print!(">>");
+        io::stdout().flush().unwrap();
         let mut program = String::new();
         io::stdin()
             .read_line(&mut program)
