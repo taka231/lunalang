@@ -22,4 +22,4 @@ pub enum Statement {
     Assign(String, Expr),
 }
 
-type Statements = Vec<Statement>;
+pub type Statements = Vec<Statement>;
