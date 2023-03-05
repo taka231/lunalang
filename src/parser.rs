@@ -1,8 +1,8 @@
-use crate::ast::{self, e_bin_op, e_if, e_int, Expr};
+use crate::ast::{self, e_bin_op, e_if, e_int, Expr, Statement, Statements};
 use nom::{
     branch::alt,
     bytes::complete::tag,
-    character::complete::{digit1, multispace0, one_of, satisfy},
+    character::complete::{alphanumeric0, digit1, multispace0, multispace1, one_of, satisfy},
     combinator::{fail, map_res, opt, value},
     error::ParseError,
     multi::{many0, many1},
@@ -40,6 +40,10 @@ pub fn expr_int(input: &str) -> IResult<&str, Expr> {
 
 fn symbol<'a>(s: &'a str) -> impl FnMut(&'a str) -> IResult<&'a str, &str> {
     ws(tag(s))
+}
+
+fn keyword<'a>(s: &'a str) -> impl FnMut(&'a str) -> IResult<&'a str, &str> {
+    delimited(multispace0, tag(s), multispace1)
 }
 
 /// ## Example
@@ -156,6 +160,52 @@ pub fn expr_if(input: &str) -> IResult<&str, Expr> {
     let (input, _) = symbol("else")(input)?;
     let (input, e2) = parser_expr(input)?;
     Ok((input, e_if(cond, e1, e2)))
+}
+
+pub fn statement_assign(input: &str) -> IResult<&str, Statement> {
+    let (input, _) = keyword("let")(input)?;
+    let (input, id) = identifier(input)?;
+    let (input, _) = symbol("=")(input)?;
+    let (input, e) = parser_expr(input)?;
+    let (input, _) = symbol(";")(input)?;
+    Ok((input, Statement::Assign(id, e)))
+}
+
+#[test]
+fn statement_assign_test() {
+    assert_eq!(
+        statement_assign("let a = 1;").unwrap().1,
+        Statement::Assign("a".to_string(), e_int(1))
+    );
+}
+
+fn identifier(input: &str) -> IResult<&str, String> {
+    let (input, first_char) = one_of("abcdefghijklmnopqrstuvwxyz")(input)?;
+    let (input, chars) = alphanumeric0(input)?;
+    Ok((input, (first_char.to_string() + chars)))
+}
+
+#[test]
+fn identifier_test() {
+    assert_eq!(identifier("aA3B").unwrap().1, "aA3B".to_string());
+    assert!(identifier("PA3B").is_err());
+    assert_eq!(identifier("a3Bse").unwrap().1, "a3Bse".to_string());
+}
+
+pub fn parser_statements(input: &str) -> IResult<&str, Statements> {
+    let (input, statements) = many1(statement_assign)(input)?;
+    Ok((input, statements))
+}
+
+#[test]
+fn parser_statements_test() {
+    assert_eq!(
+        parser_statements("let a = 1; let b = 2;").unwrap().1,
+        vec![
+            Statement::Assign("a".to_string(), e_int(1)),
+            Statement::Assign("b".to_string(), e_int(2))
+        ]
+    )
 }
 
 pub fn parser_expr<'a>(input: &'a str) -> IResult<&'a str, Expr> {
