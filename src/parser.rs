@@ -1,4 +1,4 @@
-use crate::ast::{self, e_bin_op, e_if, e_int, Expr, Statement, Statements};
+use crate::ast::{self, e_bin_op, e_if, e_int, e_var, Expr, Statement, Statements};
 use nom::{
     branch::alt,
     bytes::complete::tag,
@@ -62,6 +62,10 @@ pub fn term(input: &str) -> IResult<&str, Expr> {
         expr_int,
         delimited(symbol("("), expr_op_4n, symbol(")")),
         expr_if,
+        |input| {
+            let (input, ident) = identifier(input)?;
+            Ok((input, Expr::EVar(ident)))
+        },
     ))(input)
 }
 
@@ -150,6 +154,10 @@ fn test_expr_op() {
             "",
             e_if(e_bin_op("<", e_int(1), e_int(2)), e_int(1), e_int(2))
         ))
+    );
+    assert_eq!(
+        parser_expr("a+b"),
+        Ok(("", e_bin_op("+", e_var("a"), e_var("b"))))
     )
 }
 
