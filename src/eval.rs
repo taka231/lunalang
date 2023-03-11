@@ -77,6 +77,7 @@ impl Eval {
                     _ => Err(EvalError::InternalTypeError),
                 }
             }
+            Expr::EVar(ident) => self.env.get(ident),
         }
     }
     pub fn eval_statement(&mut self, ast: Statement) -> Result<(), EvalError> {
@@ -128,4 +129,5 @@ fn test_eval_statements() {
         assert_eq!(eval.eval_main(), v)
     }
     test_eval_statements_helper("let main = 4;", Ok(v_int(4)));
+    test_eval_statements_helper("let a = 3; let b = 4; let main = a + b;", Ok(v_int(7)));
 }
