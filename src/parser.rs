@@ -188,8 +188,10 @@ fn statement_assign_test() {
 }
 
 fn identifier(input: &str) -> IResult<&str, String> {
+    let (input, _) = multispace0(input)?;
     let (input, first_char) = one_of("abcdefghijklmnopqrstuvwxyz")(input)?;
     let (input, chars) = alphanumeric0(input)?;
+    let (input, _) = multispace0(input)?;
     Ok((input, (first_char.to_string() + chars)))
 }
 
@@ -208,10 +210,31 @@ pub fn parser_statements(input: &str) -> IResult<&str, Statements> {
 #[test]
 fn parser_statements_test() {
     assert_eq!(
+        parser_statements("let main = 1;").unwrap().1,
+        vec![Statement::Assign("main".to_string(), e_int(1)),]
+    );
+    assert_eq!(
+        parser_statements("let main = a + b;").unwrap().1,
+        vec![Statement::Assign(
+            "main".to_string(),
+            e_bin_op("+", e_var("a"), e_var("b"))
+        ),]
+    );
+    assert_eq!(
         parser_statements("let a = 1; let b = 2;").unwrap().1,
         vec![
             Statement::Assign("a".to_string(), e_int(1)),
             Statement::Assign("b".to_string(), e_int(2))
+        ]
+    );
+    assert_eq!(
+        parser_statements("let a = 1; let b = 2; let main = a + b;")
+            .unwrap()
+            .1,
+        vec![
+            Statement::Assign("a".to_string(), e_int(1)),
+            Statement::Assign("b".to_string(), e_int(2)),
+            Statement::Assign("main".to_string(), e_bin_op("+", e_var("a"), e_var("b")))
         ]
     )
 }
