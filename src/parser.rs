@@ -158,7 +158,11 @@ fn test_expr_op() {
     assert_eq!(
         parser_expr("a+b"),
         Ok(("", e_bin_op("+", e_var("a"), e_var("b"))))
-    )
+    );
+    assert_eq!(
+        parser_expr("a + b"),
+        Ok(("", e_bin_op("+", e_var("a"), e_var("b"))))
+    );
 }
 
 pub fn expr_if(input: &str) -> IResult<&str, Expr> {
