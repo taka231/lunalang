@@ -1,5 +1,6 @@
-use crate::ast::Expr;
+use crate::ast::{Expr, Statement, Statements};
 use crate::error::TypeInferError;
+use std::collections::HashMap;
 use std::fmt;
 use std::{borrow::Borrow, cell::RefCell, fmt::Display, rc::Rc};
 
@@ -8,6 +9,44 @@ pub enum Type {
     TInt,
     TBool,
     TVar(u64, Rc<RefCell<Option<Type>>>),
+}
+
+impl Type {
+    fn simplify(&self) -> Self {
+        match self {
+            t @ Self::TVar(n, ty) => match (**ty).borrow().clone() {
+                Some(ty) => ty.simplify(),
+                None => t.clone(),
+            },
+            ty => ty.clone(),
+        }
+    }
+}
+
+struct TypeEnv {
+    env: HashMap<String, Type>,
+}
+
+impl TypeEnv {
+    pub fn new() -> Self {
+        TypeEnv {
+            env: HashMap::new(),
+        }
+    }
+    pub fn get(&self, name: String) -> Result<Type, TypeInferError> {
+        match self.env.get(&name) {
+            Some(ty) => Ok(ty.clone()),
+            None => Err(TypeInferError::UndefinedVariable(name)),
+        }
+    }
+    pub fn insert(&mut self, name: String, val: Type) {
+        self.env.insert(name, val);
+    }
+}
+
+pub struct TypeInfer {
+    env: TypeEnv,
+    unassigned_num: u64,
 }
 
 impl Display for Type {
@@ -23,49 +62,101 @@ impl Display for Type {
     }
 }
 
-pub fn typeinfer_expr(ast: &Expr) -> Result<Type, TypeInferError> {
-    match ast {
-        Expr::EInt(_) => Ok(Type::TInt),
-        Expr::EBinOp(op, e1, e2) => match &op as &str {
-            "+" | "-" | "*" | "/" => {
-                unify(Type::TInt, typeinfer_expr(e1)?)?;
-                unify(Type::TInt, typeinfer_expr(e2)?)?;
-                Ok(Type::TInt)
-            }
-            "<" | ">" | "<=" | ">=" | "==" | "!=" => {
-                unify(Type::TInt, typeinfer_expr(e1)?)?;
-                unify(Type::TInt, typeinfer_expr(e2)?)?;
-                Ok(Type::TBool)
-            }
-            _ => Err(TypeInferError::UnimplementedOperatorError(op.clone())),
-        },
-        Expr::EIf(cond, e1, e2) => {
-            unify(Type::TBool, typeinfer_expr(cond)?)?;
-            let t = typeinfer_expr(e1)?;
-            unify(t.clone(), typeinfer_expr(e2)?)?;
-            Ok(t)
+impl TypeInfer {
+    pub fn new() -> Self {
+        TypeInfer {
+            env: TypeEnv::new(),
+            unassigned_num: 0,
         }
+    }
+    pub fn newTVar(&mut self) -> Type {
+        let ty = Type::TVar(self.unassigned_num, Rc::new(RefCell::new(None)));
+        self.unassigned_num += 1;
+        ty
+    }
+    pub fn typeinfer_expr(&self, ast: &Expr) -> Result<Type, TypeInferError> {
+        match ast {
+            Expr::EInt(_) => Ok(Type::TInt),
+            Expr::EBinOp(op, e1, e2) => match &op as &str {
+                "+" | "-" | "*" | "/" => {
+                    unify(Type::TInt, self.typeinfer_expr(e1)?)?;
+                    unify(Type::TInt, self.typeinfer_expr(e2)?)?;
+                    Ok(Type::TInt)
+                }
+                "<" | ">" | "<=" | ">=" | "==" | "!=" => {
+                    unify(Type::TInt, self.typeinfer_expr(e1)?)?;
+                    unify(Type::TInt, self.typeinfer_expr(e2)?)?;
+                    Ok(Type::TBool)
+                }
+                _ => Err(TypeInferError::UnimplementedOperatorError(op.clone())),
+            },
+            Expr::EIf(cond, e1, e2) => {
+                unify(Type::TBool, self.typeinfer_expr(cond)?)?;
+                let t = self.typeinfer_expr(e1)?;
+                unify(t.clone(), self.typeinfer_expr(e2)?)?;
+                Ok(t)
+            }
+            Expr::EVar(ident) => self.env.get(ident.to_string()),
+        }
+    }
+    pub fn typeinfer_statement(&mut self, ast: &Statement) -> Result<(), TypeInferError> {
+        match ast {
+            Statement::Assign(name, e) => {
+                let ty = self.newTVar();
+                self.env.insert(name.to_string(), ty.clone());
+                let inferred_ty = self.typeinfer_expr(e)?;
+                unify(ty, inferred_ty)?;
+            }
+        }
+        Ok(())
+    }
+    pub fn typeinfer_statements(&mut self, asts: &Statements) -> Result<(), TypeInferError> {
+        for ast in asts {
+            self.typeinfer_statement(ast)?;
+        }
+        Ok(())
     }
 }
 
 #[test]
 fn typeinfer_expr_test() {
     use crate::parser::parser_expr;
+    let typeinfer = TypeInfer::new();
     assert_eq!(
-        typeinfer_expr(&parser_expr("1+1").unwrap().1),
+        typeinfer.typeinfer_expr(&parser_expr("1+1").unwrap().1),
         Ok(Type::TInt)
     );
     assert_eq!(
-        typeinfer_expr(&parser_expr("3<2").unwrap().1),
+        typeinfer.typeinfer_expr(&parser_expr("3<2").unwrap().1),
         Ok(Type::TBool)
     );
     assert_eq!(
-        typeinfer_expr(&parser_expr("if (3>2) 1 else 2").unwrap().1),
+        typeinfer.typeinfer_expr(&parser_expr("if (3>2) 1 else 2").unwrap().1),
         Ok(Type::TInt)
     );
     assert_eq!(
-        typeinfer_expr(&parser_expr("if (3>2) 1 else 3>2").unwrap().1),
+        typeinfer.typeinfer_expr(&parser_expr("if (3>2) 1 else 3>2").unwrap().1),
         Err(TypeInferError::UnifyError(Type::TInt, Type::TBool))
+    );
+}
+
+#[test]
+fn typeinfer_statements_test() {
+    use crate::parser::parser_statements;
+    fn typeinfer_statements_test_helper(str: &str, name: &str, ty: Result<Type, TypeInferError>) {
+        let mut typeinfer = TypeInfer::new();
+        typeinfer.typeinfer_statements(&parser_statements(str).unwrap().1);
+        assert_eq!(
+            typeinfer.env.get(name.to_string()).map(|t| t.simplify()),
+            ty
+        )
+    }
+    typeinfer_statements_test_helper("let a = 1;", "a", Ok(Type::TInt));
+    typeinfer_statements_test_helper("let a = 1; let b = a + 1;", "b", Ok(Type::TInt));
+    typeinfer_statements_test_helper(
+        "let a = 1; let b = if (a == 1) 3 > 2 else 4 < 2;",
+        "b",
+        Ok(Type::TBool),
     );
 }
 
