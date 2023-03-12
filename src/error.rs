@@ -34,7 +34,7 @@ impl Display for EvalError {
         match self {
             Self::InternalTypeError => write!(f, "InternalTypeError"),
             Self::UnimplementedOperatorError(op) => write!(f, "{} is unimplemented", op),
-            Self::UndefinedVariable(var) => write!(f, "{} is a undefined variable", var),
+            Self::UndefinedVariable(var) => write!(f, "{} is an undefined variable", var),
         }
     }
 }
