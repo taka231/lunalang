@@ -1,11 +1,12 @@
 use crate::ast::Expr;
 use crate::eval::{Eval, Value};
 use crate::parser::parser_expr;
-use crate::typeinfer::typeinfer_expr;
+use crate::typeinfer::TypeInfer;
 use std::io::{self, Write};
 pub fn repl() {
     println!("Welcome to lunalang repl!");
     let eval = Eval::new();
+    let typeinfer = TypeInfer::new();
     loop {
         print!(">>");
         io::stdout().flush().unwrap();
@@ -24,7 +25,7 @@ pub fn repl() {
         let ast = parser_expr(&program);
         match ast {
             Ok((_, ast)) => {
-                let ty = typeinfer_expr(&ast);
+                let ty = typeinfer.typeinfer_expr(&ast);
                 if let Err(err) = ty {
                     println!("type error: {}", err);
                     continue;
