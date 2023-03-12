@@ -38,11 +38,11 @@ pub fn expr_int(input: &str) -> IResult<&str, Expr> {
     Ok((input, Expr::EInt(n)))
 }
 
-fn symbol<'a>(s: &'a str) -> impl FnMut(&'a str) -> IResult<&'a str, &str> {
+pub fn symbol<'a>(s: &'a str) -> impl FnMut(&'a str) -> IResult<&'a str, &str> {
     ws(tag(s))
 }
 
-fn keyword<'a>(s: &'a str) -> impl FnMut(&'a str) -> IResult<&'a str, &str> {
+pub fn keyword<'a>(s: &'a str) -> impl FnMut(&'a str) -> IResult<&'a str, &str> {
     delimited(multispace0, tag(s), multispace1)
 }
 
