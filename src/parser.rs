@@ -1,4 +1,6 @@
-use crate::ast::{self, e_bin_op, e_if, e_int, e_var, Expr, Statement, Statements};
+use crate::ast::{
+    self, e_bin_op, e_if, e_int, e_var, Expr, Statement, StatementOrExpr, Statements,
+};
 use nom::{
     branch::alt,
     bytes::complete::tag,
@@ -246,4 +248,11 @@ fn parser_statements_test() {
 pub fn parser_expr<'a>(input: &'a str) -> IResult<&'a str, Expr> {
     let (input, expr) = expr_op_4n(input)?;
     Ok((input, expr))
+}
+
+pub fn parser_statement_or_expr(input: &str) -> IResult<&str, StatementOrExpr> {
+    match statement_assign(input) {
+        Ok((input, stmt)) => Ok((input, StatementOrExpr::Statement(stmt))),
+        Err(_) => parser_expr(input).map(|(input, e)| (input, StatementOrExpr::Expr(e))),
+    }
 }
