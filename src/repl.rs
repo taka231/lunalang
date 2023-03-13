@@ -1,41 +1,83 @@
-use crate::ast::Expr;
+use crate::ast::{Expr, StatementOrExpr};
 use crate::eval::{Eval, Value};
-use crate::parser::parser_expr;
+use crate::parser::{keyword, parser_expr, parser_statement_or_expr, symbol};
 use crate::typeinfer::TypeInfer;
 use std::io::{self, Write};
-pub fn repl() {
-    println!("Welcome to lunalang repl!");
-    let eval = Eval::new();
-    let typeinfer = TypeInfer::new();
-    loop {
+
+pub struct REPL {
+    eval: Eval,
+    typeinfer: TypeInfer,
+    is_typecheck: bool,
+    program: String,
+}
+
+impl REPL {
+    fn new() -> Self {
+        REPL {
+            eval: Eval::new(),
+            typeinfer: TypeInfer::new(),
+            is_typecheck: false,
+            program: "".to_string(),
+        }
+    }
+    fn welcome(&self) {
+        println!("Welcome to lunalang repl!");
+    }
+    fn prompt(&self) {
         print!(">>");
         io::stdout().flush().unwrap();
+    }
+    fn input(&mut self) {
         let mut program = String::new();
         io::stdin()
             .read_line(&mut program)
             .expect("Failed to read line.");
-        if program == ":q\n" {
+        self.program = program;
+        self.is_typecheck = false;
+    }
+    fn is_quit(&self) -> bool {
+        symbol(":q")(&self.program).is_ok()
+    }
+    fn parse_typecheck(&mut self) {
+        let result = symbol(":t")(&self.program);
+        match result {
+            Ok((input, _)) => {
+                self.program = input.to_string();
+                self.is_typecheck = true
+            }
+            Err(_) => self.is_typecheck = false,
+        }
+    }
+}
+
+pub fn repl() {
+    let mut repl = REPL::new();
+    repl.welcome();
+    loop {
+        repl.prompt();
+        repl.input();
+        if repl.is_quit() {
             break;
         }
-        let mut is_typecheck = false;
-        if program.starts_with(":t") {
-            program = program[2..].to_string();
-            is_typecheck = true;
-        }
-        let ast = parser_expr(&program);
+        repl.parse_typecheck();
+        let ast = parser_statement_or_expr(&repl.program);
         match ast {
-            Ok((_, ast)) => {
-                let ty = typeinfer.typeinfer_expr(&ast);
+            Ok((_, StatementOrExpr::Expr(ast))) => {
+                let ty = repl.typeinfer.typeinfer_expr(&ast);
                 if let Err(err) = ty {
                     println!("type error: {}", err);
                     continue;
                 }
-                if is_typecheck {
+                if repl.is_typecheck {
                     println!("{}", ty.unwrap());
                     continue;
                 }
-                let result = eval.eval_expr(ast);
+                let result = repl.eval.eval_expr(ast);
                 println!("{:?}", result);
+            }
+            Ok((_, StatementOrExpr::Statement(stmt))) => {
+                repl.typeinfer.typeinfer_statement(&stmt);
+                repl.eval.eval_statement(stmt);
             }
             Err(err) => {
                 println!("{:?}", err);
