@@ -28,3 +28,9 @@ pub enum Statement {
 }
 
 pub type Statements = Vec<Statement>;
+
+#[derive(PartialEq, Eq, Debug, Clone)]
+pub enum StatementOrExpr {
+    Statement(Statement),
+    Expr(Expr),
+}
