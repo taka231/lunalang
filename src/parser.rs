@@ -1,8 +1,10 @@
-use crate::ast::{self, e_bin_op, e_if, e_int, Expr};
+use crate::ast::{
+    self, e_bin_op, e_if, e_int, e_var, Expr, Statement, StatementOrExpr, Statements,
+};
 use nom::{
     branch::alt,
     bytes::complete::tag,
-    character::complete::{digit1, multispace0, one_of, satisfy},
+    character::complete::{alphanumeric0, digit1, multispace0, multispace1, one_of, satisfy},
     combinator::{fail, map_res, opt, value},
     error::ParseError,
     multi::{many0, many1},
@@ -38,8 +40,12 @@ pub fn expr_int(input: &str) -> IResult<&str, Expr> {
     Ok((input, Expr::EInt(n)))
 }
 
-fn symbol<'a>(s: &'a str) -> impl FnMut(&'a str) -> IResult<&'a str, &str> {
+pub fn symbol<'a>(s: &'a str) -> impl FnMut(&'a str) -> IResult<&'a str, &str> {
     ws(tag(s))
+}
+
+pub fn keyword<'a>(s: &'a str) -> impl FnMut(&'a str) -> IResult<&'a str, &str> {
+    delimited(multispace0, tag(s), multispace1)
 }
 
 /// ## Example
@@ -58,6 +64,10 @@ pub fn term(input: &str) -> IResult<&str, Expr> {
         expr_int,
         delimited(symbol("("), expr_op_4n, symbol(")")),
         expr_if,
+        |input| {
+            let (input, ident) = identifier(input)?;
+            Ok((input, Expr::EVar(ident)))
+        },
     ))(input)
 }
 
@@ -146,7 +156,15 @@ fn test_expr_op() {
             "",
             e_if(e_bin_op("<", e_int(1), e_int(2)), e_int(1), e_int(2))
         ))
-    )
+    );
+    assert_eq!(
+        parser_expr("a+b"),
+        Ok(("", e_bin_op("+", e_var("a"), e_var("b"))))
+    );
+    assert_eq!(
+        parser_expr("a + b"),
+        Ok(("", e_bin_op("+", e_var("a"), e_var("b"))))
+    );
 }
 
 pub fn expr_if(input: &str) -> IResult<&str, Expr> {
@@ -158,7 +176,83 @@ pub fn expr_if(input: &str) -> IResult<&str, Expr> {
     Ok((input, e_if(cond, e1, e2)))
 }
 
+pub fn statement_assign(input: &str) -> IResult<&str, Statement> {
+    let (input, _) = keyword("let")(input)?;
+    let (input, id) = identifier(input)?;
+    let (input, _) = symbol("=")(input)?;
+    let (input, e) = parser_expr(input)?;
+    let (input, _) = symbol(";")(input)?;
+    Ok((input, Statement::Assign(id, e)))
+}
+
+#[test]
+fn statement_assign_test() {
+    assert_eq!(
+        statement_assign("let a = 1;").unwrap().1,
+        Statement::Assign("a".to_string(), e_int(1))
+    );
+}
+
+fn identifier(input: &str) -> IResult<&str, String> {
+    let (input, _) = multispace0(input)?;
+    let (input, first_char) = one_of("abcdefghijklmnopqrstuvwxyz")(input)?;
+    let (input, chars) = alphanumeric0(input)?;
+    let (input, _) = multispace0(input)?;
+    Ok((input, (first_char.to_string() + chars)))
+}
+
+#[test]
+fn identifier_test() {
+    assert_eq!(identifier("aA3B").unwrap().1, "aA3B".to_string());
+    assert!(identifier("PA3B").is_err());
+    assert_eq!(identifier("a3Bse").unwrap().1, "a3Bse".to_string());
+}
+
+pub fn parser_statements(input: &str) -> IResult<&str, Statements> {
+    let (input, statements) = many1(statement_assign)(input)?;
+    Ok((input, statements))
+}
+
+#[test]
+fn parser_statements_test() {
+    assert_eq!(
+        parser_statements("let main = 1;").unwrap().1,
+        vec![Statement::Assign("main".to_string(), e_int(1)),]
+    );
+    assert_eq!(
+        parser_statements("let main = a + b;").unwrap().1,
+        vec![Statement::Assign(
+            "main".to_string(),
+            e_bin_op("+", e_var("a"), e_var("b"))
+        ),]
+    );
+    assert_eq!(
+        parser_statements("let a = 1; let b = 2;").unwrap().1,
+        vec![
+            Statement::Assign("a".to_string(), e_int(1)),
+            Statement::Assign("b".to_string(), e_int(2))
+        ]
+    );
+    assert_eq!(
+        parser_statements("let a = 1; let b = 2; let main = a + b;")
+            .unwrap()
+            .1,
+        vec![
+            Statement::Assign("a".to_string(), e_int(1)),
+            Statement::Assign("b".to_string(), e_int(2)),
+            Statement::Assign("main".to_string(), e_bin_op("+", e_var("a"), e_var("b")))
+        ]
+    )
+}
+
 pub fn parser_expr<'a>(input: &'a str) -> IResult<&'a str, Expr> {
     let (input, expr) = expr_op_4n(input)?;
     Ok((input, expr))
+}
+
+pub fn parser_statement_or_expr(input: &str) -> IResult<&str, StatementOrExpr> {
+    match statement_assign(input) {
+        Ok((input, stmt)) => Ok((input, StatementOrExpr::Statement(stmt))),
+        Err(_) => parser_expr(input).map(|(input, e)| (input, StatementOrExpr::Expr(e))),
+    }
 }
