@@ -8,7 +8,12 @@ use std::{borrow::Borrow, cell::RefCell, fmt::Display, rc::Rc};
 pub enum Type {
     TInt,
     TBool,
+    TFun(Box<Type>, Box<Type>),
     TVar(u64, Rc<RefCell<Option<Type>>>),
+}
+
+fn t_fun(t1: Type, t2: Type) -> Type {
+    Type::TFun(Box::new(t1), Box::new(t2))
 }
 
 impl Type {
@@ -18,29 +23,41 @@ impl Type {
                 Some(ty) => ty.simplify(),
                 None => t.clone(),
             },
-            ty => ty.clone(),
+            Type::TFun(t1, t2) => t_fun(t1.simplify(), t2.simplify()),
+            Type::TInt => Type::TInt,
+            Type::TBool => Type::TBool,
         }
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct TypeEnv {
     env: HashMap<String, Type>,
+    outer: Option<Box<TypeEnv>>,
 }
 
 impl TypeEnv {
     pub fn new() -> Self {
         TypeEnv {
             env: HashMap::new(),
+            outer: None,
         }
     }
     pub fn get(&self, name: String) -> Result<Type, TypeInferError> {
         match self.env.get(&name) {
             Some(ty) => Ok(ty.clone()),
-            None => Err(TypeInferError::UndefinedVariable(name)),
+            None => match &self.outer {
+                None => Err(TypeInferError::UndefinedVariable(name)),
+                Some(env) => env.get(name),
+            },
         }
     }
     pub fn insert(&mut self, name: String, val: Type) {
         self.env.insert(name, val);
+    }
+    pub fn new_enclosed_env(&mut self) {
+        self.outer = Some(Box::new(self.clone()));
+        self.env = HashMap::new();
     }
 }
 
@@ -58,6 +75,7 @@ impl Display for Type {
                 Some(ref t) => t.fmt(f),
                 None => write!(f, "{}", n),
             },
+            Type::TFun(t1, t2) => write!(f, "{} -> {}", t1, t2),
         }
     }
 }
@@ -74,7 +92,7 @@ impl TypeInfer {
         self.unassigned_num += 1;
         ty
     }
-    pub fn typeinfer_expr(&self, ast: &Expr) -> Result<Type, TypeInferError> {
+    pub fn typeinfer_expr(&mut self, ast: &Expr) -> Result<Type, TypeInferError> {
         match ast {
             Expr::EInt(_) => Ok(Type::TInt),
             Expr::EBinOp(op, e1, e2) => match &op as &str {
@@ -97,6 +115,14 @@ impl TypeInfer {
                 Ok(t)
             }
             Expr::EVar(ident) => self.env.get(ident.to_string()),
+            Expr::EFun(arg, e) => {
+                self.env.new_enclosed_env();
+                let ty = self.newTVar();
+                self.env.insert(arg.to_string(), ty.clone());
+                let result_ty = self.typeinfer_expr(e)?;
+                self.env = *self.env.outer.clone().unwrap();
+                Ok(t_fun(ty, result_ty))
+            }
         }
     }
     pub fn typeinfer_statement(&mut self, ast: &Statement) -> Result<(), TypeInferError> {
@@ -121,7 +147,7 @@ impl TypeInfer {
 #[test]
 fn typeinfer_expr_test() {
     use crate::parser::parser_expr;
-    let typeinfer = TypeInfer::new();
+    let mut typeinfer = TypeInfer::new();
     assert_eq!(
         typeinfer.typeinfer_expr(&parser_expr("1+1").unwrap().1),
         Ok(Type::TInt)
@@ -158,6 +184,11 @@ fn typeinfer_statements_test() {
         "b",
         Ok(Type::TBool),
     );
+    typeinfer_statements_test_helper(
+        "let add(a, b) = a + b;",
+        "add",
+        Ok(t_fun(Type::TInt, t_fun(Type::TInt, Type::TInt))),
+    );
 }
 
 fn unify(t1: Type, t2: Type) -> Result<(), TypeInferError> {
@@ -182,6 +213,10 @@ fn unify(t1: Type, t2: Type) -> Result<(), TypeInferError> {
                 Ok(())
             }
         }
+        (Type::TFun(tyA1, tyA2), Type::TFun(tyB1, tyB2)) => {
+            unify(*tyA1, *tyB1)?;
+            unify(*tyA2, *tyB2)
+        }
         (t1, t2) => Err(TypeInferError::UnifyError(t1, t2)),
     }
 }
@@ -199,5 +234,6 @@ fn occur(n: u64, t: Type) -> bool {
             Some(ref t1) => occur(n, t1.clone()),
             None => false,
         },
+        (n, Type::TFun(t1, t2)) => occur(n, *t1) || occur(n, *t2),
     }
 }
