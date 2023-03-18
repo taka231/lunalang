@@ -256,3 +256,9 @@ pub fn parser_statement_or_expr(input: &str) -> IResult<&str, StatementOrExpr> {
         Err(_) => parser_expr(input).map(|(input, e)| (input, StatementOrExpr::Expr(e))),
     }
 }
+
+pub fn parser_for_repl(input: &str) -> IResult<&str, StatementOrExpr> {
+    let (input, stmt) = parser_statement_or_expr(input)?;
+    let (input, _) = eof(input)?;
+    Ok((input, stmt))
+}
