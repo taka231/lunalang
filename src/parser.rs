@@ -1,13 +1,13 @@
 use crate::ast::{
-    self, e_bin_op, e_if, e_int, e_var, Expr, Statement, StatementOrExpr, Statements,
+    self, e_bin_op, e_fun, e_if, e_int, e_var, Expr, Statement, StatementOrExpr, Statements,
 };
 use nom::{
     branch::alt,
     bytes::complete::tag,
     character::complete::{alphanumeric0, digit1, multispace0, multispace1, one_of, satisfy},
-    combinator::{fail, map_res, opt, value},
+    combinator::{eof, fail, map_res, opt, value},
     error::ParseError,
-    multi::{many0, many1},
+    multi::{many0, many1, separated_list0},
     sequence::delimited,
     IResult,
 };
@@ -193,6 +193,33 @@ fn statement_assign_test() {
     );
 }
 
+pub fn fun_def(input: &str) -> IResult<&str, Statement> {
+    let (input, _) = keyword("let")(input)?;
+    let (input, id) = identifier(input)?;
+    let (input, _) = symbol("(")(input)?;
+    let (input, args) = separated_list0(symbol(","), identifier)(input)?;
+    let (input, _) = symbol(")")(input)?;
+    let (input, _) = symbol("=")(input)?;
+    let (input, expr) = parser_expr(input)?;
+    let (input, _) = symbol(";")(input)?;
+    let mut result = expr;
+    for i in (0..args.len()).rev() {
+        result = Expr::EFun(args[i].clone(), Box::new(result))
+    }
+    Ok((input, Statement::Assign(id, result)))
+}
+
+#[test]
+pub fn fun_def_test() {
+    assert_eq!(
+        fun_def("let add(a, b) = a + b;").unwrap().1,
+        Statement::Assign(
+            "add".to_string(),
+            e_fun("a", e_fun("b", e_bin_op("+", e_var("a"), e_var("b"))))
+        )
+    )
+}
+
 fn identifier(input: &str) -> IResult<&str, String> {
     let (input, _) = multispace0(input)?;
     let (input, first_char) = one_of("abcdefghijklmnopqrstuvwxyz")(input)?;
@@ -208,8 +235,29 @@ fn identifier_test() {
     assert_eq!(identifier("a3Bse").unwrap().1, "a3Bse".to_string());
 }
 
+pub fn parser_statement(input: &str) -> IResult<&str, Statement> {
+    let (input, statement) = alt((fun_def, statement_assign))(input)?;
+    Ok((input, statement))
+}
+
+#[test]
+pub fn parser_statement_test() {
+    assert_eq!(
+        parser_statement("let main = 1;").unwrap().1,
+        Statement::Assign("main".to_string(), e_int(1)),
+    );
+    assert_eq!(
+        parser_statement("let add(a, b) = a + b;").unwrap().1,
+        Statement::Assign(
+            "add".to_string(),
+            e_fun("a", e_fun("b", e_bin_op("+", e_var("a"), e_var("b"))))
+        )
+    );
+}
+
 pub fn parser_statements(input: &str) -> IResult<&str, Statements> {
-    let (input, statements) = many1(statement_assign)(input)?;
+    let (input, statements) = many1(parser_statement)(input)?;
+    let (input, _) = eof(input)?;
     Ok((input, statements))
 }
 
@@ -251,7 +299,7 @@ pub fn parser_expr<'a>(input: &'a str) -> IResult<&'a str, Expr> {
 }
 
 pub fn parser_statement_or_expr(input: &str) -> IResult<&str, StatementOrExpr> {
-    match statement_assign(input) {
+    match parser_statement(input) {
         Ok((input, stmt)) => Ok((input, StatementOrExpr::Statement(stmt))),
         Err(_) => parser_expr(input).map(|(input, e)| (input, StatementOrExpr::Expr(e))),
     }

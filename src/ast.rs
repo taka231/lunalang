@@ -4,6 +4,7 @@ pub enum Expr {
     EBinOp(String, Box<Expr>, Box<Expr>),
     EIf(Box<Expr>, Box<Expr>, Box<Expr>),
     EVar(String),
+    EFun(String, Box<Expr>),
 }
 
 pub fn e_int(n: i64) -> Expr {
@@ -20,6 +21,10 @@ pub fn e_if(cond: Expr, e1: Expr, e2: Expr) -> Expr {
 
 pub fn e_var(str: &str) -> Expr {
     Expr::EVar(str.to_string())
+}
+
+pub fn e_fun(str: &str, e: Expr) -> Expr {
+    Expr::EFun(str.to_string(), Box::new(e))
 }
 
 #[derive(PartialEq, Eq, Debug, Clone)]
