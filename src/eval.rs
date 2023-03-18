@@ -1,4 +1,6 @@
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use crate::ast::{Expr, Statement, Statements};
 use crate::error::EvalError;
@@ -6,6 +8,7 @@ use crate::error::EvalError;
 pub enum Value {
     VInt(i64),
     VBool(bool),
+    VFun(String, Expr, Environment),
 }
 
 fn v_int(n: i64) -> Value {
@@ -16,35 +19,49 @@ fn v_bool(b: bool) -> Value {
     Value::VBool(b)
 }
 
+#[derive(Eq, PartialEq, Debug, Clone)]
 pub struct Environment {
     env: HashMap<String, Value>,
+    outer: Option<Rc<RefCell<Environment>>>,
 }
 
 impl Environment {
     pub fn new() -> Self {
         Environment {
             env: HashMap::new(),
+            outer: None,
         }
     }
     pub fn get(&self, name: String) -> Result<Value, EvalError> {
         match self.env.get(&name) {
             Some(value) => Ok(value.clone()),
-            None => Err(EvalError::UndefinedVariable(name)),
+            None => match &self.outer {
+                None => Err(EvalError::UndefinedVariable(name)),
+                Some(env) => env.borrow().get(name),
+            },
         }
     }
     pub fn insert(&mut self, name: String, val: Value) {
         self.env.insert(name, val);
     }
+    pub fn new_enclosed_env(env: Rc<RefCell<Environment>>) -> Self {
+        Environment {
+            env: HashMap::new(),
+            outer: Some(env),
+        }
+    }
 }
 
 pub struct Eval {
-    env: Environment,
+    env: Rc<RefCell<Environment>>,
 }
 
 impl Eval {
     pub fn new() -> Eval {
         let env = Environment::new();
-        Eval { env }
+        Eval {
+            env: Rc::new(RefCell::new(env)),
+        }
     }
     pub fn eval_expr(&self, ast: Expr) -> Result<Value, EvalError> {
         match ast {
@@ -77,25 +94,30 @@ impl Eval {
                     _ => Err(EvalError::InternalTypeError),
                 }
             }
-            Expr::EVar(ident) => self.env.get(ident),
+            Expr::EVar(ident) => self.env.borrow().get(ident),
+            Expr::EFun(arg, e) => Ok(Value::VFun(
+                arg,
+                *e,
+                Environment::new_enclosed_env(Rc::clone(&self.env)),
+            )),
         }
     }
-    pub fn eval_statement(&mut self, ast: Statement) -> Result<(), EvalError> {
+    pub fn eval_statement(&self, ast: Statement) -> Result<(), EvalError> {
         match ast {
             Statement::Assign(name, e) => {
                 let val = self.eval_expr(e)?;
-                Ok(self.env.insert(name, val))
+                Ok(self.env.borrow_mut().insert(name, val))
             }
         }
     }
-    pub fn eval_statements(&mut self, asts: Statements) -> Result<(), EvalError> {
+    pub fn eval_statements(&self, asts: Statements) -> Result<(), EvalError> {
         for ast in asts {
             self.eval_statement(ast)?;
         }
         Ok(())
     }
     pub fn eval_main(&self) -> Result<Value, EvalError> {
-        self.env.get("main".to_string())
+        self.env.borrow().get("main".to_string())
     }
 }
 
