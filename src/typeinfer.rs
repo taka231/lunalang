@@ -183,27 +183,36 @@ fn typeinfer_expr_test() {
     );
 }
 
+fn typeinfer_statements_test_helper(str: &str, name: &str, ty: Result<Type, TypeInferError>) {
+    use crate::parser::parser_statements;
+    let mut typeinfer = TypeInfer::new();
+    typeinfer.typeinfer_statements(&parser_statements(str).unwrap().1);
+    assert_eq!(
+        Rc::clone(&typeinfer.env)
+            .borrow()
+            .get(name.to_string())
+            .map(|t| t.simplify()),
+        ty
+    )
+}
+
 #[test]
 fn typeinfer_statements_test() {
-    use crate::parser::parser_statements;
-    fn typeinfer_statements_test_helper(str: &str, name: &str, ty: Result<Type, TypeInferError>) {
-        let mut typeinfer = TypeInfer::new();
-        typeinfer.typeinfer_statements(&parser_statements(str).unwrap().1);
-        assert_eq!(
-            Rc::clone(&typeinfer.env)
-                .borrow()
-                .get(name.to_string())
-                .map(|t| t.simplify()),
-            ty
-        )
-    }
     typeinfer_statements_test_helper("let a = 1;", "a", Ok(Type::TInt));
     typeinfer_statements_test_helper("let a = 1; let b = a + 1;", "b", Ok(Type::TInt));
+}
+
+#[test]
+fn typeinfer_if_test() {
     typeinfer_statements_test_helper(
         "let a = 1; let b = if (a == 1) 3 > 2 else 4 < 2;",
         "b",
         Ok(Type::TBool),
     );
+}
+
+#[test]
+fn typeinfer_fun_test() {
     typeinfer_statements_test_helper(
         "let add(a, b) = a + b;",
         "add",
