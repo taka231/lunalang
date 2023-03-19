@@ -101,21 +101,21 @@ impl TypeInfer {
             Expr::EInt(_) => Ok(Type::TInt),
             Expr::EBinOp(op, e1, e2) => match &op as &str {
                 "+" | "-" | "*" | "/" => {
-                    unify(Type::TInt, self.typeinfer_expr(e1)?)?;
-                    unify(Type::TInt, self.typeinfer_expr(e2)?)?;
+                    unify(&Type::TInt, &self.typeinfer_expr(e1)?)?;
+                    unify(&Type::TInt, &self.typeinfer_expr(e2)?)?;
                     Ok(Type::TInt)
                 }
                 "<" | ">" | "<=" | ">=" | "==" | "!=" => {
-                    unify(Type::TInt, self.typeinfer_expr(e1)?)?;
-                    unify(Type::TInt, self.typeinfer_expr(e2)?)?;
+                    unify(&Type::TInt, &self.typeinfer_expr(e1)?)?;
+                    unify(&Type::TInt, &self.typeinfer_expr(e2)?)?;
                     Ok(Type::TBool)
                 }
                 _ => Err(TypeInferError::UnimplementedOperatorError(op.clone())),
             },
             Expr::EIf(cond, e1, e2) => {
-                unify(Type::TBool, self.typeinfer_expr(cond)?)?;
+                unify(&Type::TBool, &self.typeinfer_expr(cond)?)?;
                 let t = self.typeinfer_expr(e1)?;
-                unify(t.clone(), self.typeinfer_expr(e2)?)?;
+                unify(&t, &self.typeinfer_expr(e2)?)?;
                 Ok(t)
             }
             Expr::EVar(ident) => self.env.borrow().get(ident),
@@ -137,7 +137,7 @@ impl TypeInfer {
                 let t1 = self.typeinfer_expr(e1)?;
                 let t2 = self.typeinfer_expr(e2)?;
                 let t3 = self.newTVar();
-                unify(t1, t_fun(t2, t3.clone()))?;
+                unify(&t1, &t_fun(t2, t3.clone()))?;
                 Ok(t3)
             }
         }
@@ -148,7 +148,7 @@ impl TypeInfer {
                 let ty = self.newTVar();
                 self.env.borrow_mut().insert(name.to_string(), ty.clone());
                 let inferred_ty = self.typeinfer_expr(e)?;
-                unify(ty, inferred_ty)?;
+                unify(&ty, &inferred_ty)?;
             }
         }
         Ok(())
@@ -231,33 +231,37 @@ fn typeinfer_fun_test() {
     );
 }
 
-fn unify(t1: Type, t2: Type) -> Result<(), TypeInferError> {
+fn unify(t1: &Type, t2: &Type) -> Result<(), TypeInferError> {
     match (t1, t2) {
         (t1, t2) if t1 == t2 => Ok(()),
         (Type::TVar(n1, _), Type::TVar(n2, _)) if n1 == n2 => Ok(()),
-        (Type::TVar(_, t1), t2) if (*t1).borrow().is_some() => unify(unwrap_all(t1), t2),
-        (t1, Type::TVar(_, t2)) if (*t2).borrow().is_some() => unify(t1, unwrap_all(t2)),
+        (Type::TVar(_, t1), t2) if (*t1).borrow().is_some() => {
+            unify(&unwrap_all(Rc::clone(t1)), t2)
+        }
+        (t1, Type::TVar(_, t2)) if (*t2).borrow().is_some() => {
+            unify(t1, &unwrap_all(Rc::clone(t2)))
+        }
         (Type::TVar(n1, t1), t2) => {
-            if occur(n1, t2.clone()) {
-                Err(TypeInferError::OccurError(n1, t2))
+            if occur(*n1, t2) {
+                Err(TypeInferError::OccurError(*n1, t2.clone()))
             } else {
-                *(*t1).borrow_mut() = Some(t2);
+                *(*t1).borrow_mut() = Some(t2.clone());
                 Ok(())
             }
         }
         (t1, Type::TVar(n2, t2)) => {
-            if occur(n2, t1.clone()) {
-                Err(TypeInferError::OccurError(n2, t1))
+            if occur(*n2, t1) {
+                Err(TypeInferError::OccurError(*n2, t1.clone()))
             } else {
-                *(*t2).borrow_mut() = Some(t1);
+                *(*t2).borrow_mut() = Some(t1.clone());
                 Ok(())
             }
         }
         (Type::TFun(tyA1, tyA2), Type::TFun(tyB1, tyB2)) => {
-            unify(*tyA1, *tyB1)?;
-            unify(*tyA2, *tyB2)
+            unify(&*tyA1, &*tyB1)?;
+            unify(&*tyA2, &*tyB2)
         }
-        (t1, t2) => Err(TypeInferError::UnifyError(t1, t2)),
+        (t1, t2) => Err(TypeInferError::UnifyError(t1.clone(), t2.clone())),
     }
 }
 
@@ -265,15 +269,15 @@ fn unwrap_all(t: Rc<RefCell<Option<Type>>>) -> Type {
     (*t).borrow().as_ref().unwrap().clone()
 }
 
-fn occur(n: u64, t: Type) -> bool {
+fn occur(n: u64, t: &Type) -> bool {
     match (n, t) {
         (_, Type::TInt) => false,
         (_, Type::TBool) => false,
-        (n, Type::TVar(m, _)) if n == m => true,
+        (n, Type::TVar(m, _)) if n == *m => true,
         (n, Type::TVar(_, t1)) => match *(*t1).borrow() {
-            Some(ref t1) => occur(n, t1.clone()),
+            Some(ref t1) => occur(n, t1),
             None => false,
         },
-        (n, Type::TFun(t1, t2)) => occur(n, *t1) || occur(n, *t2),
+        (n, Type::TFun(t1, t2)) => occur(n, t1) || occur(n, t2),
     }
 }
