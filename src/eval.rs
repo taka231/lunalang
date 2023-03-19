@@ -138,13 +138,14 @@ impl Eval {
     }
 }
 
-#[test]
-fn test_eval_expr() {
+fn test_eval_expr_helper(str: &str, v: Result<Value, EvalError>) {
     use crate::parser::parser_expr;
-    fn test_eval_expr_helper(str: &str, v: Result<Value, EvalError>) {
-        let eval = Eval::new();
-        assert_eq!(eval.eval_expr(parser_expr(str).unwrap().1), v)
-    }
+    let eval = Eval::new();
+    assert_eq!(eval.eval_expr(parser_expr(str).unwrap().1), v)
+}
+
+#[test]
+fn test_op_expr() {
     test_eval_expr_helper("3*3+4*4", Ok(v_int(25)));
     test_eval_expr_helper("4+(6/3)-2", Ok(v_int(4)));
     test_eval_expr_helper("2+4/2/2", Ok(v_int(3)));
@@ -154,19 +155,45 @@ fn test_eval_expr() {
     test_eval_expr_helper("2<=3", Ok(v_bool(true)));
     test_eval_expr_helper("2==3", Ok(v_bool(false)));
     test_eval_expr_helper("2!=3", Ok(v_bool(true)));
+}
+
+#[test]
+fn test_if_expr() {
     test_eval_expr_helper("if (3>2) 1 else 2", Ok(v_int(1)));
     test_eval_expr_helper("if (3<2) 1 else 2", Ok(v_int(2)));
     test_eval_expr_helper("if (3<2) 1 else if (4==4) 2 else 3", Ok(v_int(2)));
 }
 
+fn test_eval_statements_helper(str: &str, v: Result<Value, EvalError>) {
+    use crate::parser::parser_statements;
+    let mut eval = Eval::new();
+    eval.eval_statements(parser_statements(str).unwrap().1);
+    assert_eq!(eval.eval_main(), v)
+}
+
 #[test]
 fn test_eval_statements() {
-    use crate::parser::parser_statements;
-    fn test_eval_statements_helper(str: &str, v: Result<Value, EvalError>) {
-        let mut eval = Eval::new();
-        eval.eval_statements(parser_statements(str).unwrap().1);
-        assert_eq!(eval.eval_main(), v)
-    }
     test_eval_statements_helper("let main = 4;", Ok(v_int(4)));
     test_eval_statements_helper("let a = 3; let b = 4; let main = a + b;", Ok(v_int(7)));
+    test_eval_statements_helper("let add(a, b) = a + b; let main = add(2, 3);", Ok(v_int(5)));
+}
+
+#[test]
+fn test_high_order_function() {
+    test_eval_statements_helper(
+        "let double(f, x) = f(f(x)); let succ(n) = n + 1; let main = double(succ, 3);",
+        Ok(v_int(5)),
+    );
+}
+
+#[test]
+fn test_recursive_function() {
+    test_eval_statements_helper(
+        "let fact(n) = if (n==1) 1 else n * fact(n-1); let main = fact(3);",
+        Ok(v_int(6)),
+    );
+    test_eval_statements_helper(
+        "let fib(n) = if (n==1) 1 else if (n==2) 1 else fib(n-1) + fib(n-2); let main = fib(5);",
+        Ok(v_int(5)),
+    );
 }
