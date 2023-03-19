@@ -69,14 +69,11 @@ pub struct TypeInfer {
 
 impl Display for Type {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
+        match self.simplify() {
             Type::TInt => write!(f, "{}", "Int"),
             Type::TBool => write!(f, "{}", "Bool"),
-            Type::TVar(n, t) => match *(**t).borrow() {
-                Some(ref t) => t.fmt(f),
-                None => write!(f, "{}", n),
-            },
-            Type::TFun(t1, t2) => write!(f, "{} -> {}", t1, t2),
+            Type::TVar(n, _) => write!(f, "a{}", n),
+            Type::TFun(t1, t2) => write!(f, "({}) -> {}", t1, t2),
         }
     }
 }
@@ -127,7 +124,7 @@ impl TypeInfer {
                     TypeEnv::new_enclosed_env(Rc::clone(&self.env)),
                     self.unassigned_num,
                 );
-                let ty = self.newTVar();
+                let ty = typeinfer.newTVar();
                 typeinfer
                     .env
                     .borrow_mut()
@@ -137,11 +134,11 @@ impl TypeInfer {
                 Ok(t_fun(ty, result_ty))
             }
             Expr::EFunApp(e1, e2) => {
-                let t1 = self.newTVar();
-                let t2 = self.newTVar();
-                unify(t_fun(t1.clone(), t2.clone()), self.typeinfer_expr(e1)?)?;
-                unify(t1, self.typeinfer_expr(e2)?)?;
-                Ok(t2)
+                let t1 = self.typeinfer_expr(e1)?;
+                let t2 = self.typeinfer_expr(e2)?;
+                let t3 = self.newTVar();
+                unify(t1, t_fun(t2, t3.clone()))?;
+                Ok(t3)
             }
         }
     }
@@ -216,6 +213,12 @@ fn typeinfer_statements_test() {
         "let add(a, b) = a + b; let a = add(2, 3);",
         "a",
         Ok(Type::TInt),
+    );
+    typeinfer_statements_test_helper("let id(x) = x; let a = id(2);", "a", Ok(Type::TInt));
+    typeinfer_statements_test_helper(
+        "let id(x) = x; let a = id(2);",
+        "id",
+        Ok(t_fun(Type::TInt, Type::TInt)),
     );
 }
 
