@@ -136,6 +136,13 @@ impl TypeInfer {
                 self.unassigned_num = typeinfer.unassigned_num;
                 Ok(t_fun(ty, result_ty))
             }
+            Expr::EFunApp(e1, e2) => {
+                let t1 = self.newTVar();
+                let t2 = self.newTVar();
+                unify(t_fun(t1.clone(), t2.clone()), self.typeinfer_expr(e1)?)?;
+                unify(t1, self.typeinfer_expr(e2)?)?;
+                Ok(t2)
+            }
         }
     }
     pub fn typeinfer_statement(&mut self, ast: &Statement) -> Result<(), TypeInferError> {
@@ -204,6 +211,11 @@ fn typeinfer_statements_test() {
         "let add(a, b) = a + b;",
         "add",
         Ok(t_fun(Type::TInt, t_fun(Type::TInt, Type::TInt))),
+    );
+    typeinfer_statements_test_helper(
+        "let add(a, b) = a + b; let a = add(2, 3);",
+        "a",
+        Ok(Type::TInt),
     );
 }
 
