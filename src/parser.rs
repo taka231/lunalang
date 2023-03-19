@@ -1,5 +1,6 @@
 use crate::ast::{
-    self, e_bin_op, e_fun, e_if, e_int, e_var, Expr, Statement, StatementOrExpr, Statements,
+    self, e_bin_op, e_fun, e_fun_app, e_if, e_int, e_var, Expr, Statement, StatementOrExpr,
+    Statements,
 };
 use nom::{
     branch::alt,
@@ -62,8 +63,9 @@ pub fn op(input: &str) -> IResult<&str, String> {
 pub fn term(input: &str) -> IResult<&str, Expr> {
     alt((
         expr_int,
-        delimited(symbol("("), expr_op_4n, symbol(")")),
+        delimited(symbol("("), parser_expr, symbol(")")),
         expr_if,
+        fun_app,
         |input| {
             let (input, ident) = identifier(input)?;
             Ok((input, Expr::EVar(ident)))
@@ -74,7 +76,7 @@ pub fn term(input: &str) -> IResult<&str, Expr> {
 pub fn expr_op_7l(input: &str) -> IResult<&str, Expr> {
     let (input, e1) = term(input)?;
     let (input, e2) = many0(|input| {
-        let (input, op) = alt((tag("*"), tag("/")))(input)?;
+        let (input, op) = alt((symbol("*"), symbol("/")))(input)?;
         let (input, ex) = term(input)?;
         Ok((input, (op, ex)))
     })(input)?;
@@ -88,7 +90,7 @@ pub fn expr_op_7l(input: &str) -> IResult<&str, Expr> {
 pub fn expr_op_6l(input: &str) -> IResult<&str, Expr> {
     let (input, e1) = expr_op_7l(input)?;
     let (input, e2) = many0(|input| {
-        let (input, op) = alt((tag("+"), tag("-")))(input)?;
+        let (input, op) = alt((symbol("+"), symbol("-")))(input)?;
         let (input, ex) = expr_op_7l(input)?;
         Ok((input, (op, ex)))
     })(input)?;
@@ -165,6 +167,10 @@ fn test_expr_op() {
         parser_expr("a + b"),
         Ok(("", e_bin_op("+", e_var("a"), e_var("b"))))
     );
+    assert_eq!(
+        parser_expr("add(2, 3)").unwrap().1,
+        e_fun_app(e_fun_app(e_var("add"), e_int(2)), e_int(3)),
+    )
 }
 
 pub fn expr_if(input: &str) -> IResult<&str, Expr> {
@@ -174,6 +180,29 @@ pub fn expr_if(input: &str) -> IResult<&str, Expr> {
     let (input, _) = symbol("else")(input)?;
     let (input, e2) = parser_expr(input)?;
     Ok((input, e_if(cond, e1, e2)))
+}
+
+pub fn fun_app(input: &str) -> IResult<&str, Expr> {
+    let (input, e) = alt((delimited(symbol("("), parser_expr, symbol(")")), |input| {
+        let (input, ident) = identifier(input)?;
+        Ok((input, Expr::EVar(ident)))
+    }))(input)?;
+    let (input, _) = symbol("(")(input)?;
+    let (input, args) = separated_list0(symbol(","), parser_expr)(input)?;
+    let (input, _) = symbol(")")(input)?;
+    Ok((
+        input,
+        args.iter()
+            .fold(e, |acc, expr| e_fun_app(acc, expr.clone())),
+    ))
+}
+
+#[test]
+fn fun_app_test() {
+    assert_eq!(
+        fun_app("add(2, 3)").unwrap().1,
+        e_fun_app(e_fun_app(e_var("add"), e_int(2)), e_int(3)),
+    )
 }
 
 pub fn statement_assign(input: &str) -> IResult<&str, Statement> {
