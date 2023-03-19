@@ -153,13 +153,6 @@ fn test_expr_op() {
         ))
     );
     assert_eq!(
-        parser_expr("if (1<2) 1 else 2"),
-        Ok((
-            "",
-            e_if(e_bin_op("<", e_int(1), e_int(2)), e_int(1), e_int(2))
-        ))
-    );
-    assert_eq!(
         parser_expr("a+b"),
         Ok(("", e_bin_op("+", e_var("a"), e_var("b"))))
     );
@@ -167,6 +160,25 @@ fn test_expr_op() {
         parser_expr("a + b"),
         Ok(("", e_bin_op("+", e_var("a"), e_var("b"))))
     );
+    assert_eq!(
+        parser_expr("add(2, 3)").unwrap().1,
+        e_fun_app(e_fun_app(e_var("add"), e_int(2)), e_int(3)),
+    )
+}
+
+#[test]
+fn test_expr_if() {
+    assert_eq!(
+        parser_expr("if (1<2) 1 else 2"),
+        Ok((
+            "",
+            e_if(e_bin_op("<", e_int(1), e_int(2)), e_int(1), e_int(2))
+        ))
+    );
+}
+
+#[test]
+fn test_fun_app() {
     assert_eq!(
         parser_expr("add(2, 3)").unwrap().1,
         e_fun_app(e_fun_app(e_var("add"), e_int(2)), e_int(3)),
