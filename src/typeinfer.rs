@@ -42,11 +42,11 @@ impl TypeEnv {
             outer: None,
         }
     }
-    pub fn get(&self, name: String) -> Result<Type, TypeInferError> {
-        match self.env.get(&name) {
+    pub fn get(&self, name: &str) -> Result<Type, TypeInferError> {
+        match self.env.get(name) {
             Some(ty) => Ok(ty.clone()),
             None => match &self.outer {
-                None => Err(TypeInferError::UndefinedVariable(name)),
+                None => Err(TypeInferError::UndefinedVariable(name.to_owned())),
                 Some(env) => env.borrow().get(name),
             },
         }
@@ -118,7 +118,7 @@ impl TypeInfer {
                 unify(t.clone(), self.typeinfer_expr(e2)?)?;
                 Ok(t)
             }
-            Expr::EVar(ident) => self.env.borrow().get(ident.to_string()),
+            Expr::EVar(ident) => self.env.borrow().get(ident),
             Expr::EFun(arg, e) => {
                 let mut typeinfer = TypeInfer::from(
                     TypeEnv::new_enclosed_env(Rc::clone(&self.env)),
@@ -190,7 +190,7 @@ fn typeinfer_statements_test_helper(str: &str, name: &str, ty: Result<Type, Type
     assert_eq!(
         Rc::clone(&typeinfer.env)
             .borrow()
-            .get(name.to_string())
+            .get(name)
             .map(|t| t.simplify()),
         ty
     )
