@@ -1,6 +1,6 @@
 use crate::ast::{Expr, StatementOrExpr};
 use crate::eval::{Eval, Value};
-use crate::parser::{keyword, parser_expr, parser_statement_or_expr, symbol};
+use crate::parser::{keyword, parser_expr, parser_for_repl, parser_statement_or_expr, symbol};
 use crate::typeinfer::TypeInfer;
 use std::io::{self, Write};
 
@@ -60,7 +60,7 @@ pub fn repl() {
             break;
         }
         repl.parse_typecheck();
-        let ast = parser_statement_or_expr(&repl.program);
+        let ast = parser_for_repl(&repl.program);
         match ast {
             Ok((_, StatementOrExpr::Expr(ast))) => {
                 let ty = repl.typeinfer.typeinfer_expr(&ast);
@@ -76,8 +76,13 @@ pub fn repl() {
                 println!("{:?}", result);
             }
             Ok((_, StatementOrExpr::Statement(stmt))) => {
-                repl.typeinfer.typeinfer_statement(&stmt);
-                repl.eval.eval_statement(stmt);
+                match repl.typeinfer.typeinfer_statement(&stmt) {
+                    Ok(()) => match repl.eval.eval_statement(stmt) {
+                        Ok(()) => (),
+                        Err(err) => println!("eval error: {}", err),
+                    },
+                    Err(err) => println!("type error: {}", err),
+                }
             }
             Err(err) => {
                 println!("{:?}", err);
