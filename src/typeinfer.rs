@@ -1,8 +1,7 @@
 use crate::ast::{Expr, Statement, Statements};
 use crate::error::TypeInferError;
 use std::collections::HashMap;
-use std::fmt;
-use std::{borrow::Borrow, cell::RefCell, fmt::Display, rc::Rc};
+use std::{cell::RefCell, fmt::Display, rc::Rc};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Type {
@@ -33,7 +32,7 @@ impl Type {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct TypeEnv {
     env: HashMap<String, Type>,
-    outer: Option<Box<TypeEnv>>,
+    outer: Option<Rc<RefCell<TypeEnv>>>,
 }
 
 impl TypeEnv {
@@ -48,21 +47,23 @@ impl TypeEnv {
             Some(ty) => Ok(ty.clone()),
             None => match &self.outer {
                 None => Err(TypeInferError::UndefinedVariable(name)),
-                Some(env) => env.get(name),
+                Some(env) => env.borrow().get(name),
             },
         }
     }
     pub fn insert(&mut self, name: String, val: Type) {
         self.env.insert(name, val);
     }
-    pub fn new_enclosed_env(&mut self) {
-        self.outer = Some(Box::new(self.clone()));
-        self.env = HashMap::new();
+    pub fn new_enclosed_env(env: Rc<RefCell<TypeEnv>>) -> Self {
+        TypeEnv {
+            env: HashMap::new(),
+            outer: Some(env),
+        }
     }
 }
 
 pub struct TypeInfer {
-    env: TypeEnv,
+    env: Rc<RefCell<TypeEnv>>,
     unassigned_num: u64,
 }
 
@@ -83,8 +84,14 @@ impl Display for Type {
 impl TypeInfer {
     pub fn new() -> Self {
         TypeInfer {
-            env: TypeEnv::new(),
+            env: Rc::new(RefCell::new(TypeEnv::new())),
             unassigned_num: 0,
+        }
+    }
+    fn from(env: TypeEnv, unassigned_num: u64) -> Self {
+        TypeInfer {
+            env: Rc::new(RefCell::new(env)),
+            unassigned_num,
         }
     }
     pub fn newTVar(&mut self) -> Type {
@@ -114,13 +121,19 @@ impl TypeInfer {
                 unify(t.clone(), self.typeinfer_expr(e2)?)?;
                 Ok(t)
             }
-            Expr::EVar(ident) => self.env.get(ident.to_string()),
+            Expr::EVar(ident) => self.env.borrow().get(ident.to_string()),
             Expr::EFun(arg, e) => {
-                self.env.new_enclosed_env();
+                let mut typeinfer = TypeInfer::from(
+                    TypeEnv::new_enclosed_env(Rc::clone(&self.env)),
+                    self.unassigned_num,
+                );
                 let ty = self.newTVar();
-                self.env.insert(arg.to_string(), ty.clone());
-                let result_ty = self.typeinfer_expr(e)?;
-                self.env = *self.env.outer.clone().unwrap();
+                typeinfer
+                    .env
+                    .borrow_mut()
+                    .insert(arg.to_string(), ty.clone());
+                let result_ty = typeinfer.typeinfer_expr(e)?;
+                self.unassigned_num = typeinfer.unassigned_num;
                 Ok(t_fun(ty, result_ty))
             }
         }
@@ -129,7 +142,7 @@ impl TypeInfer {
         match ast {
             Statement::Assign(name, e) => {
                 let ty = self.newTVar();
-                self.env.insert(name.to_string(), ty.clone());
+                self.env.borrow_mut().insert(name.to_string(), ty.clone());
                 let inferred_ty = self.typeinfer_expr(e)?;
                 unify(ty, inferred_ty)?;
             }
@@ -173,7 +186,10 @@ fn typeinfer_statements_test() {
         let mut typeinfer = TypeInfer::new();
         typeinfer.typeinfer_statements(&parser_statements(str).unwrap().1);
         assert_eq!(
-            typeinfer.env.get(name.to_string()).map(|t| t.simplify()),
+            Rc::clone(&typeinfer.env)
+                .borrow()
+                .get(name.to_string())
+                .map(|t| t.simplify()),
             ty
         )
     }
