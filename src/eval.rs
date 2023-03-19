@@ -63,6 +63,11 @@ impl Eval {
             env: Rc::new(RefCell::new(env)),
         }
     }
+    fn from(env: Environment) -> Eval {
+        Eval {
+            env: Rc::new(RefCell::new(env)),
+        }
+    }
     pub fn eval_expr(&self, ast: Expr) -> Result<Value, EvalError> {
         match ast {
             Expr::EBinOp(op, e1, e2) => {
@@ -100,6 +105,18 @@ impl Eval {
                 *e,
                 Environment::new_enclosed_env(Rc::clone(&self.env)),
             )),
+            Expr::EFunApp(e1, e2) => {
+                let v1 = self.eval_expr(*e1)?;
+                let v2 = self.eval_expr(*e2)?;
+                match v1 {
+                    Value::VFun(arg, expr, env) => {
+                        let eval = Eval::from(env);
+                        eval.env.borrow_mut().insert(arg, v2);
+                        eval.eval_expr(expr)
+                    }
+                    _ => Err(EvalError::InternalTypeError),
+                }
+            }
         }
     }
     pub fn eval_statement(&self, ast: Statement) -> Result<(), EvalError> {
