@@ -32,11 +32,11 @@ impl Environment {
             outer: None,
         }
     }
-    pub fn get(&self, name: String) -> Result<Value, EvalError> {
-        match self.env.get(&name) {
+    pub fn get(&self, name: &str) -> Result<Value, EvalError> {
+        match self.env.get(name) {
             Some(value) => Ok(value.clone()),
             None => match &self.outer {
-                None => Err(EvalError::UndefinedVariable(name)),
+                None => Err(EvalError::UndefinedVariable(name.to_owned())),
                 Some(env) => env.borrow().get(name),
             },
         }
@@ -99,7 +99,7 @@ impl Eval {
                     _ => Err(EvalError::InternalTypeError),
                 }
             }
-            Expr::EVar(ident) => self.env.borrow().get(ident),
+            Expr::EVar(ident) => self.env.borrow().get(&ident),
             Expr::EFun(arg, e) => Ok(Value::VFun(
                 arg,
                 *e,
@@ -134,7 +134,7 @@ impl Eval {
         Ok(())
     }
     pub fn eval_main(&self) -> Result<Value, EvalError> {
-        self.env.borrow().get("main".to_string())
+        self.env.borrow().get("main")
     }
 }
 
