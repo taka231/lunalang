@@ -7,6 +7,7 @@ use std::{cell::RefCell, fmt::Display, rc::Rc};
 pub enum Type {
     TInt,
     TBool,
+    TString,
     TFun(Box<Type>, Box<Type>),
     TVar(u64, Rc<RefCell<Option<Type>>>),
 }
@@ -25,6 +26,7 @@ impl Type {
             Type::TFun(t1, t2) => t_fun(t1.simplify(), t2.simplify()),
             Type::TInt => Type::TInt,
             Type::TBool => Type::TBool,
+            Type::TString => Type::TString,
         }
     }
 }
@@ -74,6 +76,7 @@ impl Display for Type {
             Type::TBool => write!(f, "{}", "Bool"),
             Type::TVar(n, _) => write!(f, "a{}", n),
             Type::TFun(t1, t2) => write!(f, "({}) -> {}", t1, t2),
+            Type::TString => write!(f, "String"),
         }
     }
 }
@@ -140,7 +143,7 @@ impl TypeInfer {
                 unify(&t1, &t_fun(t2, t3.clone()))?;
                 Ok(t3)
             }
-            Expr::EString(_) => todo!(),
+            Expr::EString(_) => Ok(Type::TString),
         }
     }
     pub fn typeinfer_statement(&mut self, ast: &Statement) -> Result<(), TypeInferError> {
@@ -181,6 +184,10 @@ fn typeinfer_expr_test() {
     assert_eq!(
         typeinfer.typeinfer_expr(&parser_expr("if (3>2) 1 else 3>2").unwrap().1),
         Err(TypeInferError::UnifyError(Type::TInt, Type::TBool))
+    );
+    assert_eq!(
+        typeinfer.typeinfer_expr(&Expr::EString("hoge".to_owned())),
+        Ok(Type::TString)
     );
 }
 
@@ -273,6 +280,7 @@ fn unwrap_all(t: Rc<RefCell<Option<Type>>>) -> Type {
 fn occur(n: u64, t: &Type) -> bool {
     match (n, t) {
         (_, Type::TInt) => false,
+        (_, Type::TString) => false,
         (_, Type::TBool) => false,
         (n, Type::TVar(m, _)) if n == *m => true,
         (n, Type::TVar(_, t1)) => match *(*t1).borrow() {
