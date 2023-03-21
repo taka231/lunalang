@@ -1,11 +1,13 @@
 use crate::ast::{
-    self, e_bin_op, e_fun, e_fun_app, e_if, e_int, e_var, Expr, Statement, StatementOrExpr,
-    Statements,
+    self, e_bin_op, e_fun, e_fun_app, e_if, e_int, e_string, e_var, Expr, Statement,
+    StatementOrExpr, Statements,
 };
 use nom::{
     branch::alt,
     bytes::complete::tag,
-    character::complete::{alphanumeric0, digit1, multispace0, multispace1, one_of, satisfy},
+    character::complete::{
+        alphanumeric0, digit1, multispace0, multispace1, none_of, one_of, satisfy, space0,
+    },
     combinator::{eof, fail, map_res, opt, value},
     error::ParseError,
     multi::{many0, many1, separated_list0},
@@ -70,6 +72,7 @@ pub fn term(input: &str) -> IResult<&str, Expr> {
             let (input, ident) = identifier(input)?;
             Ok((input, Expr::EVar(ident)))
         },
+        expr_string,
     ))(input)
 }
 
@@ -167,6 +170,15 @@ fn test_expr_op() {
 }
 
 #[test]
+fn test_expr_string() {
+    assert_eq!(
+        parser_expr(r#""Hello, world!""#),
+        Ok(("", e_string("Hello, world!")))
+    );
+    assert_eq!(parser_expr(r#""""#), Ok(("", e_string(""))));
+}
+
+#[test]
 fn test_expr_if() {
     assert_eq!(
         parser_expr("if (1<2) 1 else 2"),
@@ -215,6 +227,24 @@ fn fun_app_test() {
         fun_app("add(2, 3)").unwrap().1,
         e_fun_app(e_fun_app(e_var("add"), e_int(2)), e_int(3)),
     )
+}
+
+pub fn expr_string(input: &str) -> IResult<&str, Expr> {
+    let (input, _) = space0(input)?;
+    let (input, _) = tag("\"")(input)?;
+    let (input, str) = many0(none_of("\""))(input)?;
+    let (input, _) = symbol("\"")(input)?;
+    Ok((input, Expr::EString(str.iter().collect())))
+}
+
+#[test]
+fn expr_string_test() {
+    assert_eq!(
+        expr_string(r#""Hello, world!""#),
+        Ok(("", e_string("Hello, world!")))
+    );
+    assert_eq!(expr_string(r#""""#), Ok(("", e_string(""))));
+    assert_eq!(expr_string(r#"" ""#), Ok(("", e_string(" "))));
 }
 
 pub fn statement_assign(input: &str) -> IResult<&str, Statement> {
