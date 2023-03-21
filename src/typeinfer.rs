@@ -140,6 +140,7 @@ impl TypeInfer {
                 unify(&t1, &t_fun(t2, t3.clone()))?;
                 Ok(t3)
             }
+            Expr::EString(_) => todo!(),
         }
     }
     pub fn typeinfer_statement(&mut self, ast: &Statement) -> Result<(), TypeInferError> {

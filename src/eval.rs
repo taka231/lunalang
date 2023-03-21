@@ -117,6 +117,7 @@ impl Eval {
                     _ => Err(EvalError::InternalTypeError),
                 }
             }
+            Expr::EString(_) => todo!(),
         }
     }
     pub fn eval_statement(&self, ast: Statement) -> Result<(), EvalError> {
