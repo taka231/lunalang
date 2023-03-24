@@ -65,6 +65,11 @@ pub fn op(input: &str) -> IResult<&str, String> {
 pub fn term(input: &str) -> IResult<&str, Expr> {
     alt((
         expr_int,
+        |input| {
+            let (input, _) = symbol("(")(input)?;
+            let (input, _) = symbol(")")(input)?;
+            Ok((input, Expr::EUnit))
+        },
         delimited(symbol("("), parser_expr, symbol(")")),
         expr_if,
         fun_app,
