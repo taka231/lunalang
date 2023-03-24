@@ -184,6 +184,11 @@ fn test_expr_string() {
 }
 
 #[test]
+fn test_unit() {
+    assert_eq!(parser_expr("()"), Ok(("", Expr::EUnit)))
+}
+
+#[test]
 fn test_expr_if() {
     assert_eq!(
         parser_expr("if (1<2) 1 else 2"),
