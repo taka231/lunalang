@@ -144,6 +144,7 @@ impl TypeInfer {
                 Ok(t3)
             }
             Expr::EString(_) => Ok(Type::TString),
+            Expr::EUnit => todo!(),
         }
     }
     pub fn typeinfer_statement(&mut self, ast: &Statement) -> Result<(), TypeInferError> {

@@ -119,6 +119,7 @@ impl Eval {
                 }
             }
             Expr::EString(str) => Ok(Value::VString(str)),
+            Expr::EUnit => todo!(),
         }
     }
     pub fn eval_statement(&self, ast: Statement) -> Result<(), EvalError> {

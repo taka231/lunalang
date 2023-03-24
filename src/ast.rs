@@ -7,6 +7,7 @@ pub enum Expr {
     EFun(String, Box<Expr>),
     EFunApp(Box<Expr>, Box<Expr>),
     EString(String),
+    EUnit,
 }
 
 pub fn e_int(n: i64) -> Expr {
