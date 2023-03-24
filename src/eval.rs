@@ -9,6 +9,7 @@ pub enum Value {
     VInt(i64),
     VBool(bool),
     VFun(String, Expr, Environment),
+    VString(String),
 }
 
 fn v_int(n: i64) -> Value {
@@ -117,7 +118,7 @@ impl Eval {
                     _ => Err(EvalError::InternalTypeError),
                 }
             }
-            Expr::EString(_) => todo!(),
+            Expr::EString(str) => Ok(Value::VString(str)),
         }
     }
     pub fn eval_statement(&self, ast: Statement) -> Result<(), EvalError> {
@@ -163,6 +164,14 @@ fn test_if_expr() {
     test_eval_expr_helper("if (3>2) 1 else 2", Ok(v_int(1)));
     test_eval_expr_helper("if (3<2) 1 else 2", Ok(v_int(2)));
     test_eval_expr_helper("if (3<2) 1 else if (4==4) 2 else 3", Ok(v_int(2)));
+}
+
+#[test]
+fn test_string_expr() {
+    test_eval_expr_helper(
+        r#""Hello, world!""#,
+        Ok(Value::VString("Hello, world!".to_owned())),
+    )
 }
 
 fn test_eval_statements_helper(str: &str, v: Result<Value, EvalError>) {
