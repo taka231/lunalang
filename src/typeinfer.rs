@@ -8,6 +8,7 @@ pub enum Type {
     TInt,
     TBool,
     TString,
+    TUnit,
     TFun(Box<Type>, Box<Type>),
     TVar(u64, Rc<RefCell<Option<Type>>>),
 }
@@ -27,6 +28,7 @@ impl Type {
             Type::TInt => Type::TInt,
             Type::TBool => Type::TBool,
             Type::TString => Type::TString,
+            Type::TUnit => Type::TUnit,
         }
     }
 }
@@ -77,6 +79,7 @@ impl Display for Type {
             Type::TVar(n, _) => write!(f, "a{}", n),
             Type::TFun(t1, t2) => write!(f, "({}) -> {}", t1, t2),
             Type::TString => write!(f, "String"),
+            Type::TUnit => write!(f, "()"),
         }
     }
 }
@@ -144,7 +147,7 @@ impl TypeInfer {
                 Ok(t3)
             }
             Expr::EString(_) => Ok(Type::TString),
-            Expr::EUnit => todo!(),
+            Expr::EUnit => Ok(Type::TUnit),
         }
     }
     pub fn typeinfer_statement(&mut self, ast: &Statement) -> Result<(), TypeInferError> {
@@ -189,6 +192,10 @@ fn typeinfer_expr_test() {
     assert_eq!(
         typeinfer.typeinfer_expr(&Expr::EString("hoge".to_owned())),
         Ok(Type::TString)
+    );
+    assert_eq!(
+        typeinfer.typeinfer_expr(&parser_expr("()").unwrap().1),
+        Ok(Type::TUnit)
     );
 }
 
@@ -283,6 +290,7 @@ fn occur(n: u64, t: &Type) -> bool {
         (_, Type::TInt) => false,
         (_, Type::TString) => false,
         (_, Type::TBool) => false,
+        (_, Type::TUnit) => false,
         (n, Type::TVar(m, _)) if n == *m => true,
         (n, Type::TVar(_, t1)) => match *(*t1).borrow() {
             Some(ref t1) => occur(n, t1),
