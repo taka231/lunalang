@@ -6,6 +6,8 @@ pub enum Expr {
     EVar(String),
     EFun(String, Box<Expr>),
     EFunApp(Box<Expr>, Box<Expr>),
+    EString(String),
+    EUnit,
 }
 
 pub fn e_int(n: i64) -> Expr {
@@ -30,6 +32,10 @@ pub fn e_fun(str: &str, e: Expr) -> Expr {
 
 pub fn e_fun_app(e1: Expr, e2: Expr) -> Expr {
     Expr::EFunApp(Box::new(e1), Box::new(e2))
+}
+
+pub fn e_string(str: &str) -> Expr {
+    Expr::EString(str.to_owned())
 }
 
 #[derive(PartialEq, Eq, Debug, Clone)]

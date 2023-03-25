@@ -9,6 +9,9 @@ pub enum Value {
     VInt(i64),
     VBool(bool),
     VFun(String, Expr, Environment),
+    VString(String),
+    VUnit,
+    VBuiltin(fn(Value) -> Result<Value, EvalError>),
 }
 
 fn v_int(n: i64) -> Value {
@@ -23,6 +26,7 @@ fn v_bool(b: bool) -> Value {
 pub struct Environment {
     env: HashMap<String, Value>,
     outer: Option<Rc<RefCell<Environment>>>,
+    builtin: HashMap<String, Value>,
 }
 
 impl Environment {
@@ -30,13 +34,17 @@ impl Environment {
         Environment {
             env: HashMap::new(),
             outer: None,
+            builtin: Environment::builtin(),
         }
     }
-    pub fn get(&self, name: String) -> Result<Value, EvalError> {
-        match self.env.get(&name) {
+    pub fn get(&self, name: &str) -> Result<Value, EvalError> {
+        match self.env.get(name) {
             Some(value) => Ok(value.clone()),
             None => match &self.outer {
-                None => Err(EvalError::UndefinedVariable(name)),
+                None => match self.builtin.get(name) {
+                    Some(value) => Ok(value.clone()),
+                    None => Err(EvalError::UndefinedVariable(name.to_owned())),
+                },
                 Some(env) => env.borrow().get(name),
             },
         }
@@ -48,7 +56,22 @@ impl Environment {
         Environment {
             env: HashMap::new(),
             outer: Some(env),
+            builtin: Environment::builtin(),
         }
+    }
+    fn builtin() -> HashMap<String, Value> {
+        let mut builtin = HashMap::new();
+        builtin.insert(
+            "puts".to_owned(),
+            Value::VBuiltin(|value| match value {
+                Value::VString(str) => {
+                    println!("{}", str);
+                    Ok(Value::VUnit)
+                }
+                _ => Err(EvalError::InternalTypeError),
+            }),
+        );
+        builtin
     }
 }
 
@@ -99,7 +122,7 @@ impl Eval {
                     _ => Err(EvalError::InternalTypeError),
                 }
             }
-            Expr::EVar(ident) => self.env.borrow().get(ident),
+            Expr::EVar(ident) => self.env.borrow().get(&ident),
             Expr::EFun(arg, e) => Ok(Value::VFun(
                 arg,
                 *e,
@@ -114,9 +137,12 @@ impl Eval {
                         eval.env.borrow_mut().insert(arg, v2);
                         eval.eval_expr(expr)
                     }
+                    Value::VBuiltin(fun) => fun(v2),
                     _ => Err(EvalError::InternalTypeError),
                 }
             }
+            Expr::EString(str) => Ok(Value::VString(str)),
+            Expr::EUnit => Ok(Value::VUnit),
         }
     }
     pub fn eval_statement(&self, ast: Statement) -> Result<(), EvalError> {
@@ -134,7 +160,7 @@ impl Eval {
         Ok(())
     }
     pub fn eval_main(&self) -> Result<Value, EvalError> {
-        self.env.borrow().get("main".to_string())
+        self.env.borrow().get("main")
     }
 }
 
@@ -162,6 +188,19 @@ fn test_if_expr() {
     test_eval_expr_helper("if (3>2) 1 else 2", Ok(v_int(1)));
     test_eval_expr_helper("if (3<2) 1 else 2", Ok(v_int(2)));
     test_eval_expr_helper("if (3<2) 1 else if (4==4) 2 else 3", Ok(v_int(2)));
+}
+
+#[test]
+fn test_string_expr() {
+    test_eval_expr_helper(
+        r#""Hello, world!""#,
+        Ok(Value::VString("Hello, world!".to_owned())),
+    )
+}
+
+#[test]
+fn test_unit_expr() {
+    test_eval_expr_helper("()", Ok(Value::VUnit))
 }
 
 fn test_eval_statements_helper(str: &str, v: Result<Value, EvalError>) {
