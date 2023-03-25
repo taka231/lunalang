@@ -11,6 +11,7 @@ pub enum Value {
     VFun(String, Expr, Environment),
     VString(String),
     VUnit,
+    VBuiltin(fn(Value) -> Result<Value, EvalError>),
 }
 
 fn v_int(n: i64) -> Value {
@@ -25,6 +26,7 @@ fn v_bool(b: bool) -> Value {
 pub struct Environment {
     env: HashMap<String, Value>,
     outer: Option<Rc<RefCell<Environment>>>,
+    builtin: HashMap<String, Value>,
 }
 
 impl Environment {
@@ -32,13 +34,17 @@ impl Environment {
         Environment {
             env: HashMap::new(),
             outer: None,
+            builtin: Environment::builtin(),
         }
     }
     pub fn get(&self, name: &str) -> Result<Value, EvalError> {
         match self.env.get(name) {
             Some(value) => Ok(value.clone()),
             None => match &self.outer {
-                None => Err(EvalError::UndefinedVariable(name.to_owned())),
+                None => match self.builtin.get(name) {
+                    Some(value) => Ok(value.clone()),
+                    None => Err(EvalError::UndefinedVariable(name.to_owned())),
+                },
                 Some(env) => env.borrow().get(name),
             },
         }
@@ -50,7 +56,22 @@ impl Environment {
         Environment {
             env: HashMap::new(),
             outer: Some(env),
+            builtin: Environment::builtin(),
         }
+    }
+    fn builtin() -> HashMap<String, Value> {
+        let mut builtin = HashMap::new();
+        builtin.insert(
+            "puts".to_owned(),
+            Value::VBuiltin(|value| match value {
+                Value::VString(str) => {
+                    println!("{}", str);
+                    Ok(Value::VUnit)
+                }
+                _ => Err(EvalError::InternalTypeError),
+            }),
+        );
+        builtin
     }
 }
 
@@ -116,6 +137,7 @@ impl Eval {
                         eval.env.borrow_mut().insert(arg, v2);
                         eval.eval_expr(expr)
                     }
+                    Value::VBuiltin(fun) => fun(v2),
                     _ => Err(EvalError::InternalTypeError),
                 }
             }
