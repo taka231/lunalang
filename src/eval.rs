@@ -10,6 +10,7 @@ pub enum Value {
     VBool(bool),
     VFun(String, Expr, Environment),
     VString(String),
+    VUnit,
 }
 
 fn v_int(n: i64) -> Value {
@@ -119,7 +120,7 @@ impl Eval {
                 }
             }
             Expr::EString(str) => Ok(Value::VString(str)),
-            Expr::EUnit => todo!(),
+            Expr::EUnit => Ok(Value::VUnit),
         }
     }
     pub fn eval_statement(&self, ast: Statement) -> Result<(), EvalError> {
@@ -173,6 +174,11 @@ fn test_string_expr() {
         r#""Hello, world!""#,
         Ok(Value::VString("Hello, world!".to_owned())),
     )
+}
+
+#[test]
+fn test_unit_expr() {
+    test_eval_expr_helper("()", Ok(Value::VUnit))
 }
 
 fn test_eval_statements_helper(str: &str, v: Result<Value, EvalError>) {
