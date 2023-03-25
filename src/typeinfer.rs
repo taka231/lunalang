@@ -37,6 +37,7 @@ impl Type {
 struct TypeEnv {
     env: HashMap<String, Type>,
     outer: Option<Rc<RefCell<TypeEnv>>>,
+    builtin: HashMap<String, Type>,
 }
 
 impl TypeEnv {
@@ -44,13 +45,17 @@ impl TypeEnv {
         TypeEnv {
             env: HashMap::new(),
             outer: None,
+            builtin: TypeEnv::builtin(),
         }
     }
     pub fn get(&self, name: &str) -> Result<Type, TypeInferError> {
         match self.env.get(name) {
             Some(ty) => Ok(ty.clone()),
             None => match &self.outer {
-                None => Err(TypeInferError::UndefinedVariable(name.to_owned())),
+                None => match self.builtin.get(name) {
+                    Some(ty) => Ok(ty.clone()),
+                    None => Err(TypeInferError::UndefinedVariable(name.to_owned())),
+                },
                 Some(env) => env.borrow().get(name),
             },
         }
@@ -62,7 +67,13 @@ impl TypeEnv {
         TypeEnv {
             env: HashMap::new(),
             outer: Some(env),
+            builtin: TypeEnv::builtin(),
         }
+    }
+    fn builtin() -> HashMap<String, Type> {
+        let mut builtin = HashMap::new();
+        builtin.insert("puts".to_owned(), t_fun(Type::TString, Type::TUnit));
+        builtin
     }
 }
 
@@ -195,6 +206,12 @@ fn typeinfer_expr_test() {
     );
     assert_eq!(
         typeinfer.typeinfer_expr(&parser_expr("()").unwrap().1),
+        Ok(Type::TUnit)
+    );
+    assert_eq!(
+        typeinfer
+            .typeinfer_expr(&parser_expr(r#"puts("Hello, world!")"#).unwrap().1)
+            .map(|ty| ty.simplify()),
         Ok(Type::TUnit)
     );
 }
