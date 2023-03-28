@@ -1,8 +1,8 @@
 use crate::typeinfer::Type;
+use std::error::Error;
 use std::fmt;
 use std::fmt::Display;
 
-pub trait Error {}
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TypeInferError {
     UnifyError(Type, Type),
@@ -26,6 +26,8 @@ impl Display for TypeInferError {
     }
 }
 
+impl Error for TypeInferError {}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum EvalError {
     InternalTypeError,
@@ -46,3 +48,5 @@ impl Display for EvalError {
         }
     }
 }
+
+impl Error for EvalError {}
