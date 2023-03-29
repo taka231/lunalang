@@ -143,6 +143,7 @@ impl Eval {
             }
             Expr::EString(str) => Ok(Value::VString(str)),
             Expr::EUnit => Ok(Value::VUnit),
+            Expr::EBlockExpr(_) => todo!(),
         }
     }
     pub fn eval_statement(&self, ast: Statement) -> Result<(), EvalError> {

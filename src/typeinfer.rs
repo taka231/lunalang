@@ -159,6 +159,7 @@ impl TypeInfer {
             }
             Expr::EString(_) => Ok(Type::TString),
             Expr::EUnit => Ok(Type::TUnit),
+            Expr::EBlockExpr(_) => todo!(),
         }
     }
     pub fn typeinfer_statement(&mut self, ast: &Statement) -> Result<(), TypeInferError> {
