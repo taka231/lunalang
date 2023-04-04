@@ -1,4 +1,4 @@
-use crate::ast::{Expr, Statement, Statements};
+use crate::ast::{Expr, Statement, StatementOrExpr, Statements};
 use crate::error::TypeInferError;
 use std::collections::HashMap;
 use std::{cell::RefCell, fmt::Display, rc::Rc};
@@ -159,7 +159,33 @@ impl TypeInfer {
             }
             Expr::EString(_) => Ok(Type::TString),
             Expr::EUnit => Ok(Type::TUnit),
-            Expr::EBlockExpr(_) => todo!(),
+            Expr::EBlockExpr(asts) => {
+                let mut typeinfer = TypeInfer::from(
+                    TypeEnv::new_enclosed_env(Rc::clone(&self.env)),
+                    self.unassigned_num,
+                );
+                if asts.len() > 1 {
+                    for i in 0..(asts.len() - 1) {
+                        match &asts[i] {
+                            StatementOrExpr::Expr(e) => {
+                                typeinfer.typeinfer_expr(&e)?;
+                            }
+                            StatementOrExpr::Statement(stmt) => {
+                                typeinfer.typeinfer_statement(&stmt)?
+                            }
+                        }
+                    }
+                }
+                let ty = match &asts[asts.len() - 1] {
+                    StatementOrExpr::Expr(e) => typeinfer.typeinfer_expr(&e)?,
+                    StatementOrExpr::Statement(stmt) => {
+                        typeinfer.typeinfer_statement(&stmt)?;
+                        Type::TUnit
+                    }
+                };
+                self.unassigned_num = typeinfer.unassigned_num;
+                Ok(ty)
+            }
         }
     }
     pub fn typeinfer_statement(&mut self, ast: &Statement) -> Result<(), TypeInferError> {
@@ -213,6 +239,14 @@ fn typeinfer_expr_test() {
         typeinfer
             .typeinfer_expr(&parser_expr(r#"puts("Hello, world!")"#).unwrap().1)
             .map(|ty| ty.simplify()),
+        Ok(Type::TUnit)
+    );
+    assert_eq!(
+        typeinfer.typeinfer_expr(&parser_expr("{let x = 1; x == 1;}").unwrap().1),
+        Ok(Type::TBool)
+    );
+    assert_eq!(
+        typeinfer.typeinfer_expr(&parser_expr("{let x = 1;}").unwrap().1),
         Ok(Type::TUnit)
     );
 }
