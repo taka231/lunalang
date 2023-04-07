@@ -11,6 +11,7 @@ pub enum Type {
     TUnit,
     TFun(Box<Type>, Box<Type>),
     TVar(u64, Rc<RefCell<Option<Type>>>),
+    TQVar(u64),
 }
 
 fn t_fun(t1: Type, t2: Type) -> Type {
@@ -29,6 +30,7 @@ impl Type {
             Type::TBool => Type::TBool,
             Type::TString => Type::TString,
             Type::TUnit => Type::TUnit,
+            Type::TQVar(n) => Type::TQVar(*n),
         }
     }
 }
@@ -91,6 +93,7 @@ impl Display for Type {
             Type::TFun(t1, t2) => write!(f, "({}) -> {}", t1, t2),
             Type::TString => write!(f, "String"),
             Type::TUnit => write!(f, "()"),
+            Type::TQVar(n) => write!(f, "a{}", n),
         }
     }
 }
@@ -135,7 +138,10 @@ impl TypeInfer {
                 unify(&t, &self.typeinfer_expr(e2)?)?;
                 Ok(t)
             }
-            Expr::EVar(ident) => self.env.borrow().get(ident),
+            Expr::EVar(ident) => {
+                let ty = self.env.borrow().get(ident)?;
+                Ok(self.instantiate(&ty))
+            }
             Expr::EFun(arg, e) => {
                 let mut typeinfer = TypeInfer::from(
                     TypeEnv::new_enclosed_env(Rc::clone(&self.env)),
@@ -195,6 +201,7 @@ impl TypeInfer {
                 self.env.borrow_mut().insert(name.to_string(), ty.clone());
                 let inferred_ty = self.typeinfer_expr(e)?;
                 unify(&ty, &inferred_ty)?;
+                generalize(&ty);
             }
         }
         Ok(())
@@ -204,6 +211,29 @@ impl TypeInfer {
             self.typeinfer_statement(ast)?;
         }
         Ok(())
+    }
+
+    fn instantiate(&mut self, ty: &Type) -> Type {
+        let ty = ty.simplify();
+        fn go(ty: Type, map: &mut HashMap<u64, Type>, self_: &mut TypeInfer) -> Type {
+            match ty {
+                Type::TQVar(n) => match map.get(&n) {
+                    Some(t) => t.clone(),
+                    None => {
+                        let ty = self_.newTVar();
+                        map.insert(n, ty.clone());
+                        ty
+                    }
+                },
+                Type::TInt => Type::TInt,
+                Type::TBool => Type::TBool,
+                Type::TString => Type::TString,
+                Type::TUnit => Type::TUnit,
+                Type::TFun(t1, t2) => t_fun(go(*t1, map, self_), go(*t2, map, self_)),
+                t @ Type::TVar(_, _) => t,
+            }
+        }
+        go(ty, &mut HashMap::new(), self)
     }
 }
 
@@ -295,7 +325,7 @@ fn typeinfer_fun_test() {
     typeinfer_statements_test_helper(
         "let id(x) = x; let a = id(2);",
         "id",
-        Ok(t_fun(Type::TInt, Type::TInt)),
+        Ok(t_fun(Type::TQVar(1), Type::TQVar(1))),
     );
 }
 
@@ -349,5 +379,17 @@ fn occur(n: u64, t: &Type) -> bool {
             None => false,
         },
         (n, Type::TFun(t1, t2)) => occur(n, t1) || occur(n, t2),
+        (_, Type::TQVar(n)) => false,
+    }
+}
+
+fn generalize(ty: &Type) {
+    match ty.simplify() {
+        Type::TVar(n, r) => *(*r).borrow_mut() = Some(Type::TQVar(n)),
+        Type::TFun(t1, t2) => {
+            generalize(&*t1);
+            generalize(&*t2);
+        }
+        _ => (),
     }
 }
