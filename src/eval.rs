@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use crate::ast::{Expr, Statement, Statements};
+use crate::ast::{Expr, Statement, StatementOrExpr, Statements};
 use crate::error::EvalError;
 #[derive(Eq, PartialEq, Debug, Clone)]
 pub enum Value {
@@ -143,6 +143,26 @@ impl Eval {
             }
             Expr::EString(str) => Ok(Value::VString(str)),
             Expr::EUnit => Ok(Value::VUnit),
+            Expr::EBlockExpr(asts) => {
+                let eval = Eval::from(Environment::new_enclosed_env(Rc::clone(&self.env)));
+                if asts.len() > 1 {
+                    for i in 0..(asts.len() - 1) {
+                        match &asts[i] {
+                            StatementOrExpr::Statement(s) => eval.eval_statement(s.clone())?,
+                            StatementOrExpr::Expr(e) => {
+                                eval.eval_expr(e.clone())?;
+                            }
+                        }
+                    }
+                }
+                match &asts[asts.len() - 1] {
+                    StatementOrExpr::Statement(stmt) => {
+                        self.eval_statement(stmt.clone())?;
+                        Ok(Value::VUnit)
+                    }
+                    StatementOrExpr::Expr(e) => eval.eval_expr(e.clone()),
+                }
+            }
         }
     }
     pub fn eval_statement(&self, ast: Statement) -> Result<(), EvalError> {
@@ -201,6 +221,12 @@ fn test_string_expr() {
 #[test]
 fn test_unit_expr() {
     test_eval_expr_helper("()", Ok(Value::VUnit))
+}
+
+#[test]
+fn test_block_expr() {
+    test_eval_expr_helper("{let x = 1; x + 3;}", Ok(Value::VInt(4)));
+    test_eval_expr_helper("{let x = 1;}", Ok(Value::VUnit));
 }
 
 fn test_eval_statements_helper(str: &str, v: Result<Value, EvalError>) {

@@ -8,6 +8,7 @@ pub enum Expr {
     EFunApp(Box<Expr>, Box<Expr>),
     EString(String),
     EUnit,
+    EBlockExpr(Vec<StatementOrExpr>),
 }
 
 pub fn e_int(n: i64) -> Expr {

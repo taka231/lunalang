@@ -70,6 +70,7 @@ pub fn term(input: &str) -> IResult<&str, Expr> {
             let (input, _) = symbol(")")(input)?;
             Ok((input, Expr::EUnit))
         },
+        parse_block_expr,
         delimited(symbol("("), parser_expr, symbol(")")),
         expr_if,
         fun_app,
@@ -257,6 +258,47 @@ fn expr_string_test() {
     assert_eq!(expr_string(r#"" ""#), Ok(("", e_string(" "))));
 }
 
+fn parse_block_expr(input: &str) -> IResult<&str, Expr> {
+    let (input, _) = symbol("{")(input)?;
+    let (input, statement_or_expr_vec) = many1(parser_statement_or_expr)(input)?;
+    let (input, _) = symbol("}")(input)?;
+    Ok((input, Expr::EBlockExpr(statement_or_expr_vec)))
+}
+
+#[test]
+fn parse_block_expr_test() {
+    assert_eq!(
+        parse_block_expr(
+            "{
+        let x = 1;
+        x + 1;
+    }"
+        ),
+        Ok((
+            "",
+            Expr::EBlockExpr(vec![
+                StatementOrExpr::Statement(Statement::Assign("x".to_owned(), Expr::EInt(1))),
+                StatementOrExpr::Expr(e_bin_op("+", e_var("x"), e_int(1)))
+            ])
+        ))
+    );
+    assert_eq!(
+        parser_expr(
+            "{
+        let x = 1;
+        x + 1;
+    }"
+        ),
+        Ok((
+            "",
+            Expr::EBlockExpr(vec![
+                StatementOrExpr::Statement(Statement::Assign("x".to_owned(), Expr::EInt(1))),
+                StatementOrExpr::Expr(e_bin_op("+", e_var("x"), e_int(1)))
+            ])
+        ))
+    )
+}
+
 pub fn statement_assign(input: &str) -> IResult<&str, Statement> {
     let (input, _) = keyword("let")(input)?;
     let (input, id) = identifier(input)?;
@@ -382,12 +424,26 @@ pub fn parser_expr<'a>(input: &'a str) -> IResult<&'a str, Expr> {
 pub fn parser_statement_or_expr(input: &str) -> IResult<&str, StatementOrExpr> {
     match parser_statement(input) {
         Ok((input, stmt)) => Ok((input, StatementOrExpr::Statement(stmt))),
-        Err(_) => parser_expr(input).map(|(input, e)| (input, StatementOrExpr::Expr(e))),
+        Err(_) => {
+            let (input, e) = parser_expr(input)?;
+            let (input, _) = symbol(";")(input)?;
+            Ok((input, StatementOrExpr::Expr(e)))
+        }
+    }
+}
+
+pub fn parser_statement_or_expr_for_repl(input: &str) -> IResult<&str, StatementOrExpr> {
+    match parser_statement(input) {
+        Ok((input, stmt)) => Ok((input, StatementOrExpr::Statement(stmt))),
+        Err(_) => {
+            let (input, e) = parser_expr(input)?;
+            Ok((input, StatementOrExpr::Expr(e)))
+        }
     }
 }
 
 pub fn parser_for_repl(input: &str) -> IResult<&str, StatementOrExpr> {
-    let (input, stmt) = parser_statement_or_expr(input)?;
+    let (input, stmt) = parser_statement_or_expr_for_repl(input)?;
     let (input, _) = eof(input)?;
     Ok((input, stmt))
 }

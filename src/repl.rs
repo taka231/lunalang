@@ -65,7 +65,7 @@ pub fn repl() {
             Ok((_, StatementOrExpr::Expr(ast))) => {
                 let ty = repl.typeinfer.typeinfer_expr(&ast);
                 if let Err(err) = ty {
-                    println!("type error: {}", err);
+                    println!("{}", err);
                     continue;
                 }
                 if repl.is_typecheck {
@@ -79,13 +79,13 @@ pub fn repl() {
                 match repl.typeinfer.typeinfer_statement(&stmt) {
                     Ok(()) => match repl.eval.eval_statement(stmt) {
                         Ok(()) => (),
-                        Err(err) => println!("eval error: {}", err),
+                        Err(err) => println!("{}", err),
                     },
-                    Err(err) => println!("type error: {}", err),
+                    Err(err) => println!("{}", err),
                 }
             }
             Err(err) => {
-                println!("{:?}", err);
+                println!("{}", err);
             }
         }
     }
