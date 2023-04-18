@@ -63,6 +63,10 @@ pub fn op(input: &str) -> IResult<&str, String> {
 }
 
 pub fn term(input: &str) -> IResult<&str, Expr> {
+    alt((expr_if, fun_app, simple_term))(input)
+}
+
+pub fn simple_term(input: &str) -> IResult<&str, Expr> {
     alt((
         expr_int,
         |input| {
@@ -72,8 +76,6 @@ pub fn term(input: &str) -> IResult<&str, Expr> {
         },
         parse_block_expr,
         delimited(symbol("("), parser_expr, symbol(")")),
-        expr_if,
-        fun_app,
         |input| {
             let (input, ident) = identifier(input)?;
             Ok((input, Expr::EVar(ident)))
@@ -218,10 +220,7 @@ pub fn expr_if(input: &str) -> IResult<&str, Expr> {
 }
 
 pub fn fun_app(input: &str) -> IResult<&str, Expr> {
-    let (input, e) = alt((delimited(symbol("("), parser_expr, symbol(")")), |input| {
-        let (input, ident) = identifier(input)?;
-        Ok((input, Expr::EVar(ident)))
-    }))(input)?;
+    let (input, e) = simple_term(input)?;
     let (input, _) = symbol("(")(input)?;
     let (input, args) = separated_list0(symbol(","), parser_expr)(input)?;
     let (input, _) = symbol(")")(input)?;
@@ -237,6 +236,16 @@ fn fun_app_test() {
     assert_eq!(
         fun_app("add(2, 3)").unwrap().1,
         e_fun_app(e_fun_app(e_var("add"), e_int(2)), e_int(3)),
+    );
+    assert_eq!(
+        fun_app("{add;}(2, 3)").unwrap().1,
+        e_fun_app(
+            e_fun_app(
+                Expr::EBlockExpr(vec![StatementOrExpr::Expr(e_var("add"))]),
+                e_int(2)
+            ),
+            e_int(3)
+        ),
     )
 }
 
