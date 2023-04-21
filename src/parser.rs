@@ -221,9 +221,18 @@ pub fn expr_if(input: &str) -> IResult<&str, Expr> {
 
 pub fn fun_app(input: &str) -> IResult<&str, Expr> {
     let (input, e) = simple_term(input)?;
-    let (input, _) = symbol("(")(input)?;
-    let (input, args) = separated_list0(symbol(","), parser_expr)(input)?;
-    let (input, _) = symbol(")")(input)?;
+    let (input, args) = alt((
+        |input| {
+            let (input, _) = symbol("(")(input)?;
+            let (input, args) = separated_list0(symbol(","), parser_expr)(input)?;
+            let (input, _) = symbol(")")(input)?;
+            Ok((input, args))
+        },
+        |input| {
+            let (input, arg) = simple_term(input)?;
+            Ok((input, vec![arg]))
+        },
+    ))(input)?;
     Ok((
         input,
         args.iter()
@@ -357,7 +366,15 @@ fn identifier(input: &str) -> IResult<&str, String> {
     let (input, first_char) = one_of("abcdefghijklmnopqrstuvwxyz")(input)?;
     let (input, chars) = alphanumeric0(input)?;
     let (input, _) = multispace0(input)?;
-    Ok((input, (first_char.to_string() + chars)))
+    let is_keyword = |x: &&str| vec!["if", "else", "let"].contains(x);
+    let ident = first_char.to_string() + chars;
+    if is_keyword(&(&ident as &str)) {
+        return Err(nom::Err::Error(nom::error::Error::new(
+            input,
+            nom::error::ErrorKind::Tag,
+        )));
+    }
+    Ok((input, ident))
 }
 
 #[test]
