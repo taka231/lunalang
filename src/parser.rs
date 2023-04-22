@@ -224,8 +224,13 @@ pub fn fun_app(input: &str) -> IResult<&str, Expr> {
     let (input, args) = alt((
         |input| {
             let (input, _) = symbol("(")(input)?;
-            let (input, args) = separated_list0(symbol(","), parser_expr)(input)?;
+            let (input, mut args) = separated_list0(symbol(","), parser_expr)(input)?;
             let (input, _) = symbol(")")(input)?;
+            let (input, optarg) = opt(simple_term)(input)?;
+            match optarg {
+                Some(arg) => args.push(arg),
+                None => (),
+            };
             Ok((input, args))
         },
         |input| {
@@ -255,7 +260,11 @@ fn fun_app_test() {
             ),
             e_int(3)
         ),
-    )
+    );
+    assert_eq!(
+        fun_app("add(2) 3").unwrap().1,
+        e_fun_app(e_fun_app(e_var("add"), e_int(2)), e_int(3)),
+    );
 }
 
 pub fn expr_string(input: &str) -> IResult<&str, Expr> {
