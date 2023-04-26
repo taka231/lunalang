@@ -226,7 +226,7 @@ pub fn fun_app(input: &str) -> IResult<&str, Expr> {
             let (input, _) = symbol("(")(input)?;
             let (input, mut args) = separated_list0(symbol(","), parser_expr)(input)?;
             let (input, _) = symbol(")")(input)?;
-            let (input, optarg) = opt(simple_term)(input)?;
+            let (input, optarg) = opt(parse_block_expr)(input)?;
             match optarg {
                 Some(arg) => args.push(arg),
                 None => (),
@@ -234,7 +234,7 @@ pub fn fun_app(input: &str) -> IResult<&str, Expr> {
             Ok((input, args))
         },
         |input| {
-            let (input, arg) = simple_term(input)?;
+            let (input, arg) = parse_block_expr(input)?;
             Ok((input, vec![arg]))
         },
     ))(input)?;
@@ -262,8 +262,11 @@ fn fun_app_test() {
         ),
     );
     assert_eq!(
-        fun_app("add(2) 3").unwrap().1,
-        e_fun_app(e_fun_app(e_var("add"), e_int(2)), e_int(3)),
+        fun_app("add(2) {3;}").unwrap().1,
+        e_fun_app(
+            e_fun_app(e_var("add"), e_int(2)),
+            Expr::EBlockExpr(vec![StatementOrExpr::Expr(e_int(3))])
+        ),
     );
 }
 
