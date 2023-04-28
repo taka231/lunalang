@@ -63,7 +63,7 @@ pub fn op(input: &str) -> IResult<&str, String> {
 }
 
 pub fn term(input: &str) -> IResult<&str, Expr> {
-    alt((expr_if, fun_app, simple_term))(input)
+    alt((expr_if, fun_app, dot_expr, simple_term))(input)
 }
 
 pub fn simple_term(input: &str) -> IResult<&str, Expr> {
@@ -484,4 +484,91 @@ pub fn parser_for_repl(input: &str) -> IResult<&str, StatementOrExpr> {
     let (input, stmt) = parser_statement_or_expr_for_repl(input)?;
     let (input, _) = eof(input)?;
     Ok((input, stmt))
+}
+
+pub fn dot_expr(input: &str) -> IResult<&str, Expr> {
+    let (input, mut expr) = simple_term(input)?;
+    let (input, mut temp_exprs) = many1(|input| {
+        let (input, _) = symbol(".")(input)?;
+        let (input, ident) = identifier(input)?;
+        let (input, args) = opt(|input| {
+            let (input, _) = symbol("(")(input)?;
+            let (input, args) = separated_list0(symbol(","), parser_expr)(input)?;
+            let (input, _) = symbol(")")(input)?;
+            Ok((input, args))
+        })(input)?;
+        let args = args.unwrap_or(vec![]);
+        let mut temp_expr = Expr::EVar(ident);
+        for arg in args {
+            temp_expr = e_fun_app(temp_expr, arg);
+        }
+        Ok((input, temp_expr))
+    })(input)?;
+    let (input, opt_expr) = opt(parse_block_expr)(input)?;
+    match opt_expr {
+        None => (),
+        Some(e) => {
+            let len = temp_exprs.len();
+            temp_exprs[len - 1] = e_fun_app(temp_exprs[len - 1].clone(), e)
+        }
+    }
+    for temp_expr in temp_exprs {
+        expr = e_fun_app(temp_expr, expr)
+    }
+    Ok((input, expr))
+}
+
+#[test]
+fn test_dot_expr() {
+    assert_eq!(
+        dot_expr("3.inc"),
+        Ok(("", e_fun_app(e_var("inc"), Expr::EInt(3))))
+    );
+    assert_eq!(
+        dot_expr("3.inc()"),
+        Ok(("", e_fun_app(e_var("inc"), Expr::EInt(3))))
+    );
+    assert_eq!(
+        dot_expr("3.add(2)"),
+        Ok((
+            "",
+            e_fun_app(e_fun_app(e_var("add"), Expr::EInt(2)), Expr::EInt(3))
+        ))
+    );
+    assert_eq!(
+        dot_expr("3.add(2).add(4)"),
+        Ok((
+            "",
+            e_fun_app(
+                e_fun_app(e_var("add"), Expr::EInt(4)),
+                e_fun_app(e_fun_app(e_var("add"), Expr::EInt(2)), Expr::EInt(3))
+            )
+        ))
+    );
+    assert_eq!(
+        dot_expr("3.add {2;}"),
+        Ok((
+            "",
+            e_fun_app(
+                e_fun_app(
+                    e_var("add"),
+                    Expr::EBlockExpr(vec![StatementOrExpr::Expr(Expr::EInt(2))])
+                ),
+                Expr::EInt(3)
+            )
+        ))
+    );
+    assert_eq!(
+        dot_expr("3.add() {2;}"),
+        Ok((
+            "",
+            e_fun_app(
+                e_fun_app(
+                    e_var("add"),
+                    Expr::EBlockExpr(vec![StatementOrExpr::Expr(Expr::EInt(2))])
+                ),
+                Expr::EInt(3)
+            )
+        ))
+    );
 }
