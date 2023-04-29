@@ -63,7 +63,7 @@ pub fn op(input: &str) -> IResult<&str, String> {
 }
 
 pub fn term(input: &str) -> IResult<&str, Expr> {
-    alt((expr_if, fun_app, dot_expr, simple_term))(input)
+    alt((expr_if, lambda_fn, fun_app, dot_expr, simple_term))(input)
 }
 
 pub fn simple_term(input: &str) -> IResult<&str, Expr> {
@@ -378,7 +378,7 @@ fn identifier(input: &str) -> IResult<&str, String> {
     let (input, first_char) = one_of("abcdefghijklmnopqrstuvwxyz")(input)?;
     let (input, chars) = alphanumeric0(input)?;
     let (input, _) = multispace0(input)?;
-    let is_keyword = |x: &&str| vec!["if", "else", "let"].contains(x);
+    let is_keyword = |x: &&str| vec!["if", "else", "let", "fn"].contains(x);
     let ident = first_char.to_string() + chars;
     if is_keyword(&(&ident as &str)) {
         return Err(nom::Err::Error(nom::error::Error::new(
@@ -571,4 +571,21 @@ fn test_dot_expr() {
             )
         ))
     );
+}
+
+pub fn lambda_fn(input: &str) -> IResult<&str, Expr> {
+    let (input, _) = symbol("fn")(input)?;
+    let (input, args) = separated_list0(symbol(","), identifier)(input)?;
+    let (input, _) = symbol("->")(input)?;
+    let (input, mut e) = parser_expr(input)?;
+    for i in 0..args.len() {
+        let index = args.len() - i - 1;
+        e = Expr::EFun(args[index].to_owned(), Box::new(e))
+    }
+    Ok((input, e))
+}
+
+#[test]
+fn test_lambda_fn() {
+    assert_eq!(lambda_fn("fn x -> x"), Ok(("", e_fun("x", e_var("x")))));
 }
