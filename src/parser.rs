@@ -641,3 +641,23 @@ fn test_lambda_block() {
         ))
     );
 }
+
+pub fn expr_vector(input: &str) -> IResult<&str, Expr> {
+    let (input, vec) = delimited(
+        symbol("["),
+        separated_list0(symbol(","), parser_expr),
+        symbol("]"),
+    )(input)?;
+    Ok((input, Expr::EVector(vec)))
+}
+
+#[test]
+fn test_expr_vector() {
+    assert_eq!(
+        expr_vector("[1, 2, 3]"),
+        Ok((
+            "",
+            Expr::EVector(vec![Expr::EInt(1), Expr::EInt(2), Expr::EInt(3)])
+        ))
+    );
+}
