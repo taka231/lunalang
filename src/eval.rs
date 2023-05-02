@@ -163,6 +163,7 @@ impl Eval {
                     StatementOrExpr::Expr(e) => eval.eval_expr(e.clone()),
                 }
             }
+            Expr::EVector(_) => todo!(),
         }
     }
     pub fn eval_statement(&self, ast: Statement) -> Result<(), EvalError> {

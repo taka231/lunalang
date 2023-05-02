@@ -192,6 +192,7 @@ impl TypeInfer {
                 self.unassigned_num = typeinfer.unassigned_num;
                 Ok(ty)
             }
+            Expr::EVector(_) => todo!(),
         }
     }
     pub fn typeinfer_statement(&mut self, ast: &Statement) -> Result<(), TypeInferError> {
