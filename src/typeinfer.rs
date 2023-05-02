@@ -1,6 +1,7 @@
 use crate::ast::{Expr, Statement, StatementOrExpr, Statements};
 use crate::error::TypeInferError;
 use std::collections::HashMap;
+use std::fmt::write;
 use std::{cell::RefCell, fmt::Display, rc::Rc};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -12,6 +13,7 @@ pub enum Type {
     TFun(Box<Type>, Box<Type>),
     TVar(u64, Rc<RefCell<Option<Type>>>),
     TQVar(u64),
+    TVector(Box<Type>),
 }
 
 fn t_fun(t1: Type, t2: Type) -> Type {
@@ -21,7 +23,7 @@ fn t_fun(t1: Type, t2: Type) -> Type {
 impl Type {
     fn simplify(&self) -> Self {
         match self {
-            t @ Self::TVar(n, ty) => match (**ty).borrow().clone() {
+            t @ Type::TVar(n, ty) => match (**ty).borrow().clone() {
                 Some(ty) => ty.simplify(),
                 None => t.clone(),
             },
@@ -31,6 +33,7 @@ impl Type {
             Type::TString => Type::TString,
             Type::TUnit => Type::TUnit,
             Type::TQVar(n) => Type::TQVar(*n),
+            Type::TVector(ty) => Type::TVector(Box::new(ty.simplify())),
         }
     }
 }
@@ -94,6 +97,7 @@ impl Display for Type {
             Type::TString => write!(f, "String"),
             Type::TUnit => write!(f, "()"),
             Type::TQVar(n) => write!(f, "a{}", n),
+            Type::TVector(ty) => write!(f, "Vector[{}]", ty),
         }
     }
 }
@@ -192,7 +196,13 @@ impl TypeInfer {
                 self.unassigned_num = typeinfer.unassigned_num;
                 Ok(ty)
             }
-            Expr::EVector(_) => todo!(),
+            Expr::EVector(exprs) => {
+                let ty = self.newTVar();
+                for expr in exprs {
+                    unify(&ty, &self.typeinfer_expr(expr)?)?;
+                }
+                Ok(Type::TVector(Box::new(ty)))
+            }
         }
     }
     pub fn typeinfer_statement(&mut self, ast: &Statement) -> Result<(), TypeInferError> {
@@ -232,6 +242,7 @@ impl TypeInfer {
                 Type::TUnit => Type::TUnit,
                 Type::TFun(t1, t2) => t_fun(go(*t1, map, self_), go(*t2, map, self_)),
                 t @ Type::TVar(_, _) => t,
+                Type::TVector(ty) => Type::TVector(Box::new(go(*ty, map, self_))),
             }
         }
         go(ty, &mut HashMap::new(), self)
@@ -280,6 +291,12 @@ fn typeinfer_expr_test() {
         typeinfer.typeinfer_expr(&parser_expr("{let x = 1;}").unwrap().1),
         Ok(Type::TUnit)
     );
+    assert_eq!(
+        typeinfer
+            .typeinfer_expr(&parser_expr("[1, 2, 3]").unwrap().1)
+            .map(|t| t.simplify()),
+        Ok(Type::TVector(Box::new(Type::TInt)))
+    )
 }
 
 fn typeinfer_statements_test_helper(str: &str, name: &str, ty: Result<Type, TypeInferError>) {
@@ -360,6 +377,7 @@ fn unify(t1: &Type, t2: &Type) -> Result<(), TypeInferError> {
             unify(&*tyA1, &*tyB1)?;
             unify(&*tyA2, &*tyB2)
         }
+        (Type::TVector(t1), Type::TVector(t2)) => unify(t1, t2),
         (t1, t2) => Err(TypeInferError::UnifyError(t1.clone(), t2.clone())),
     }
 }
@@ -381,6 +399,7 @@ fn occur(n: u64, t: &Type) -> bool {
         },
         (n, Type::TFun(t1, t2)) => occur(n, t1) || occur(n, t2),
         (_, Type::TQVar(n)) => false,
+        (n, Type::TVector(ty)) => occur(n, ty),
     }
 }
 
@@ -391,6 +410,11 @@ fn generalize(ty: &Type) {
             generalize(&*t1);
             generalize(&*t2);
         }
-        _ => (),
+        Type::TVector(t1) => generalize(&*t1),
+        Type::TInt => (),
+        Type::TBool => (),
+        Type::TString => (),
+        Type::TUnit => (),
+        Type::TQVar(_) => (),
     }
 }

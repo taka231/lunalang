@@ -75,6 +75,7 @@ pub fn simple_term(input: &str) -> IResult<&str, Expr> {
             Ok((input, Expr::EUnit))
         },
         block_term,
+        expr_vector,
         delimited(symbol("("), parser_expr, symbol(")")),
         |input| {
             let (input, ident) = identifier(input)?;
