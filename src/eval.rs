@@ -136,6 +136,7 @@ impl Eval {
                         "-" => Ok(v_int(n1 - n2)),
                         "*" => Ok(v_int(n1 * n2)),
                         "/" => Ok(v_int(n1 / n2)),
+                        "%" => Ok(v_int(n1 % n2)),
                         "<" => Ok(v_bool(n1 < n2)),
                         ">" => Ok(v_bool(n1 > n2)),
                         "<=" => Ok(v_bool(n1 <= n2)),
@@ -258,6 +259,7 @@ fn test_op_expr() {
     test_eval_expr_helper("2<=3", Ok(v_bool(true)));
     test_eval_expr_helper("2==3", Ok(v_bool(false)));
     test_eval_expr_helper("2!=3", Ok(v_bool(true)));
+    test_eval_expr_helper("4%3", Ok(v_int(1)));
 }
 
 #[test]

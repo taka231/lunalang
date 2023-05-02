@@ -132,7 +132,7 @@ impl TypeInfer {
         match ast {
             Expr::EInt(_) => Ok(Type::TInt),
             Expr::EBinOp(op, e1, e2) => match &op as &str {
-                "+" | "-" | "*" | "/" => {
+                "+" | "-" | "*" | "/" | "%" => {
                     unify(&Type::TInt, &self.typeinfer_expr(e1)?)?;
                     unify(&Type::TInt, &self.typeinfer_expr(e2)?)?;
                     Ok(Type::TInt)
@@ -268,6 +268,10 @@ fn typeinfer_expr_test() {
     assert_eq!(
         typeinfer.typeinfer_expr(&parser_expr("3<2").unwrap().1),
         Ok(Type::TBool)
+    );
+    assert_eq!(
+        typeinfer.typeinfer_expr(&parser_expr("1%1").unwrap().1),
+        Ok(Type::TInt)
     );
     assert_eq!(
         typeinfer.typeinfer_expr(&parser_expr("if (3>2) 1 else 2").unwrap().1),

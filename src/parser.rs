@@ -95,7 +95,7 @@ pub fn block_term(input: &str) -> IResult<&str, Expr> {
 pub fn expr_op_7l(input: &str) -> IResult<&str, Expr> {
     let (input, e1) = term(input)?;
     let (input, e2) = many0(|input| {
-        let (input, op) = alt((symbol("*"), symbol("/")))(input)?;
+        let (input, op) = alt((symbol("*"), symbol("/"), symbol("%")))(input)?;
         let (input, ex) = term(input)?;
         Ok((input, (op, ex)))
     })(input)?;
@@ -163,6 +163,10 @@ fn test_expr_op() {
     assert_eq!(
         parser_expr("1<2"),
         Ok(("", e_bin_op("<", e_int(1), e_int(2))))
+    );
+    assert_eq!(
+        parser_expr("1%2"),
+        Ok(("", e_bin_op("%", e_int(1), e_int(2))))
     );
     assert_eq!(
         parser_expr("1<1+1"),
