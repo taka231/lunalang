@@ -74,7 +74,7 @@ pub fn simple_term(input: &str) -> IResult<&str, Expr> {
             let (input, _) = symbol(")")(input)?;
             Ok((input, Expr::EUnit))
         },
-        parse_block_expr,
+        block_term,
         delimited(symbol("("), parser_expr, symbol(")")),
         |input| {
             let (input, ident) = identifier(input)?;
@@ -82,6 +82,10 @@ pub fn simple_term(input: &str) -> IResult<&str, Expr> {
         },
         expr_string,
     ))(input)
+}
+
+pub fn block_term(input: &str) -> IResult<&str, Expr> {
+    alt((lambda_block_fn, parse_block_expr))(input)
 }
 
 pub fn expr_op_7l(input: &str) -> IResult<&str, Expr> {
@@ -226,7 +230,7 @@ pub fn fun_app(input: &str) -> IResult<&str, Expr> {
             let (input, _) = symbol("(")(input)?;
             let (input, mut args) = separated_list0(symbol(","), parser_expr)(input)?;
             let (input, _) = symbol(")")(input)?;
-            let (input, optarg) = opt(parse_block_expr)(input)?;
+            let (input, optarg) = opt(block_term)(input)?;
             match optarg {
                 Some(arg) => args.push(arg),
                 None => (),
@@ -234,7 +238,7 @@ pub fn fun_app(input: &str) -> IResult<&str, Expr> {
             Ok((input, args))
         },
         |input| {
-            let (input, arg) = parse_block_expr(input)?;
+            let (input, arg) = block_term(input)?;
             Ok((input, vec![arg]))
         },
     ))(input)?;
@@ -504,7 +508,7 @@ pub fn dot_expr(input: &str) -> IResult<&str, Expr> {
         }
         Ok((input, temp_expr))
     })(input)?;
-    let (input, opt_expr) = opt(parse_block_expr)(input)?;
+    let (input, opt_expr) = opt(block_term)(input)?;
     match opt_expr {
         None => (),
         Some(e) => {
@@ -588,4 +592,52 @@ pub fn lambda_fn(input: &str) -> IResult<&str, Expr> {
 #[test]
 fn test_lambda_fn() {
     assert_eq!(lambda_fn("fn x -> x"), Ok(("", e_fun("x", e_var("x")))));
+}
+
+pub fn lambda_block_fn(input: &str) -> IResult<&str, Expr> {
+    let (input, _) = symbol("{")(input)?;
+    let (input, _) = symbol("fn")(input)?;
+    let (input, args) = separated_list0(symbol(","), identifier)(input)?;
+    let (input, _) = symbol("->")(input)?;
+    let (input, statement_or_expr_vec) = many1(parser_statement_or_expr)(input)?;
+    let (input, _) = symbol("}")(input)?;
+    let mut expr = Expr::EBlockExpr(statement_or_expr_vec);
+    for i in 0..args.len() {
+        let index = args.len() - i - 1;
+        expr = Expr::EFun(args[index].to_owned(), Box::new(expr))
+    }
+    Ok((input, expr))
+}
+
+#[test]
+fn test_lambda_block() {
+    assert_eq!(
+        lambda_block_fn("{fn x -> x; x;}"),
+        Ok((
+            "",
+            e_fun(
+                "x",
+                Expr::EBlockExpr(vec![
+                    StatementOrExpr::Expr(e_var("x")),
+                    StatementOrExpr::Expr(e_var("x"))
+                ])
+            )
+        ))
+    );
+    assert_eq!(
+        parser_expr("hoge {fn x -> x; x;}"),
+        Ok((
+            "",
+            e_fun_app(
+                e_var("hoge"),
+                e_fun(
+                    "x",
+                    Expr::EBlockExpr(vec![
+                        StatementOrExpr::Expr(e_var("x")),
+                        StatementOrExpr::Expr(e_var("x"))
+                    ])
+                )
+            )
+        ))
+    );
 }
