@@ -105,6 +105,32 @@ impl Environment {
                 1,
             ),
         );
+        builtin.insert(
+            "enum_from_until".to_owned(),
+            Value::VBuiltin(
+                |values, _| match (&values[0], &values[1]) {
+                    (Value::VInt(n1), Value::VInt(n2)) => Ok(Value::VVector(
+                        (*n1..=*n2).into_iter().map(|x| Value::VInt(x)).collect(),
+                    )),
+                    _ => Err(EvalError::InternalTypeError),
+                },
+                vec![],
+                2,
+            ),
+        );
+        builtin.insert(
+            "enum_from_to".to_owned(),
+            Value::VBuiltin(
+                |values, _| match (&values[0], &values[1]) {
+                    (Value::VInt(n1), Value::VInt(n2)) => Ok(Value::VVector(
+                        (*n1..*n2).into_iter().map(|x| Value::VInt(x)).collect(),
+                    )),
+                    _ => Err(EvalError::InternalTypeError),
+                },
+                vec![],
+                2,
+            ),
+        );
         builtin
     }
 }

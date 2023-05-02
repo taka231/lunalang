@@ -86,6 +86,20 @@ impl TypeEnv {
             ),
         );
         builtin.insert("int_to_string".to_owned(), t_fun(Type::TInt, Type::TString));
+        builtin.insert(
+            "enum_from_until".to_owned(),
+            t_fun(
+                Type::TInt,
+                t_fun(Type::TInt, Type::TVector(Box::new(Type::TInt))),
+            ),
+        );
+        builtin.insert(
+            "enum_from_to".to_owned(),
+            t_fun(
+                Type::TInt,
+                t_fun(Type::TInt, Type::TVector(Box::new(Type::TInt))),
+            ),
+        );
         builtin
     }
 }

@@ -85,6 +85,7 @@ pub fn simple_term(input: &str) -> IResult<&str, Expr> {
             Ok((input, Expr::EUnit))
         },
         block_term,
+        enum_vec_expr,
         expr_vector,
         delimited(symbol("("), parser_expr, symbol(")")),
         |input| {
@@ -697,4 +698,20 @@ pub fn for_in_expr(input: &str) -> IResult<&str, Expr> {
             vec,
         ),
     ))
+}
+
+pub fn enum_vec_expr(input: &str) -> IResult<&str, Expr> {
+    let (input, _) = symbol("[")(input)?;
+    let (input, e1) = parser_expr(input)?;
+    let (input, op) = alt((symbol("..="), symbol("..")))(input)?;
+    let (input, e2) = parser_expr(input)?;
+    let (input, _) = symbol("]")(input)?;
+    match op {
+        "..=" => Ok((
+            input,
+            e_fun_app(e_fun_app(e_var("enum_from_until"), e1), e2),
+        )),
+        ".." => Ok((input, e_fun_app(e_fun_app(e_var("enum_from_to"), e1), e2))),
+        _ => panic!("internal error"),
+    }
 }
