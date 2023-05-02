@@ -11,8 +11,11 @@ pub enum Value {
     VFun(String, Expr, Environment),
     VString(String),
     VUnit,
-    VBuiltin(fn(Value) -> Result<Value, EvalError>),
+    VBuiltin(BuiltinFn, Vec<Value>, usize),
+    VVector(Vec<Value>),
 }
+
+type BuiltinFn = fn(Vec<Value>, Eval) -> Result<Value, EvalError>;
 
 fn v_int(n: i64) -> Value {
     Value::VInt(n)
@@ -63,13 +66,44 @@ impl Environment {
         let mut builtin = HashMap::new();
         builtin.insert(
             "puts".to_owned(),
-            Value::VBuiltin(|value| match value {
-                Value::VString(str) => {
-                    println!("{}", str);
-                    Ok(Value::VUnit)
-                }
-                _ => Err(EvalError::InternalTypeError),
-            }),
+            Value::VBuiltin(
+                |values, _| match &values[0] {
+                    Value::VString(str) => {
+                        println!("{}", str);
+                        Ok(Value::VUnit)
+                    }
+                    _ => Err(EvalError::InternalTypeError),
+                },
+                vec![],
+                1,
+            ),
+        );
+        builtin.insert(
+            "foreach".to_owned(),
+            Value::VBuiltin(
+                |values, eval| match (&values[0], &values[1]) {
+                    (Value::VFun(_, _, _) | Value::VBuiltin(_, _, _), Value::VVector(vec)) => {
+                        for value in vec {
+                            eval.fun_app_helper(values[0].clone(), value.clone())?;
+                        }
+                        Ok(Value::VUnit)
+                    }
+                    _ => Err(EvalError::InternalTypeError),
+                },
+                vec![],
+                2,
+            ),
+        );
+        builtin.insert(
+            "int_to_string".to_owned(),
+            Value::VBuiltin(
+                |values, _| match &values[0] {
+                    Value::VInt(n) => Ok(Value::VString(n.to_string())),
+                    _ => Err(EvalError::InternalTypeError),
+                },
+                vec![],
+                1,
+            ),
         );
         builtin
     }
@@ -131,15 +165,7 @@ impl Eval {
             Expr::EFunApp(e1, e2) => {
                 let v1 = self.eval_expr(*e1)?;
                 let v2 = self.eval_expr(*e2)?;
-                match v1 {
-                    Value::VFun(arg, expr, env) => {
-                        let eval = Eval::from(env);
-                        eval.env.borrow_mut().insert(arg, v2);
-                        eval.eval_expr(expr)
-                    }
-                    Value::VBuiltin(fun) => fun(v2),
-                    _ => Err(EvalError::InternalTypeError),
-                }
+                self.fun_app_helper(v1, v2)
             }
             Expr::EString(str) => Ok(Value::VString(str)),
             Expr::EUnit => Ok(Value::VUnit),
@@ -163,7 +189,13 @@ impl Eval {
                     StatementOrExpr::Expr(e) => eval.eval_expr(e.clone()),
                 }
             }
-            Expr::EVector(_) => todo!(),
+            Expr::EVector(exprs) => {
+                let mut vvec = vec![];
+                for e in exprs {
+                    vvec.push(self.eval_expr(e)?)
+                }
+                Ok(Value::VVector(vvec))
+            }
         }
     }
     pub fn eval_statement(&self, ast: Statement) -> Result<(), EvalError> {
@@ -182,6 +214,30 @@ impl Eval {
     }
     pub fn eval_main(&self) -> Result<Value, EvalError> {
         self.env.borrow().get("main")
+    }
+    fn fun_app_helper(&self, v1: Value, v2: Value) -> Result<Value, EvalError> {
+        match v1 {
+            Value::VFun(arg, expr, env) => {
+                let eval = Eval::from(env);
+                eval.env.borrow_mut().insert(arg, v2);
+                eval.eval_expr(expr)
+            }
+            Value::VBuiltin(fun, args, args_num) => {
+                let mut args_mut = args;
+                args_mut.push(v2);
+                if args_mut.len() == args_num {
+                    fun(
+                        args_mut,
+                        Eval {
+                            env: Rc::clone(&self.env),
+                        },
+                    )
+                } else {
+                    Ok(Value::VBuiltin(fun, args_mut, args_num))
+                }
+            }
+            _ => Err(EvalError::InternalTypeError),
+        }
     }
 }
 
@@ -262,4 +318,9 @@ fn test_recursive_function() {
         "let fib(n) = if (n==1) 1 else if (n==2) 1 else fib(n-1) + fib(n-2); let main = fib(5);",
         Ok(v_int(5)),
     );
+}
+
+#[test]
+fn test_vector() {
+    test_eval_expr_helper("[1, 2]", Ok(Value::VVector(vec![v_int(1), v_int(2)])))
 }

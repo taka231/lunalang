@@ -78,6 +78,14 @@ impl TypeEnv {
     fn builtin() -> HashMap<String, Type> {
         let mut builtin = HashMap::new();
         builtin.insert("puts".to_owned(), t_fun(Type::TString, Type::TUnit));
+        builtin.insert(
+            "foreach".to_owned(),
+            t_fun(
+                t_fun(Type::TQVar(0), Type::TUnit),
+                t_fun(Type::TVector(Box::new(Type::TQVar(0))), Type::TUnit),
+            ),
+        );
+        builtin.insert("int_to_string".to_owned(), t_fun(Type::TInt, Type::TString));
         builtin
     }
 }

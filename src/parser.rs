@@ -5,8 +5,11 @@ use crate::ast::{
 use nom::{
     branch::alt,
     bytes::complete::tag,
-    character::complete::{
-        alphanumeric0, digit1, multispace0, multispace1, none_of, one_of, satisfy, space0,
+    character::{
+        complete::{
+            alphanumeric0, digit1, multispace0, multispace1, none_of, one_of, satisfy, space0,
+        },
+        is_alphanumeric,
     },
     combinator::{eof, fail, map_res, opt, value},
     error::ParseError,
@@ -380,11 +383,12 @@ pub fn fun_def_test() {
 
 fn identifier(input: &str) -> IResult<&str, String> {
     let (input, _) = multispace0(input)?;
-    let (input, first_char) = one_of("abcdefghijklmnopqrstuvwxyz")(input)?;
-    let (input, chars) = alphanumeric0(input)?;
+    let (input, first_char) = one_of("abcdefghijklmnopqrstuvwxyz_")(input)?;
+    let (input, mut chars) = many0(satisfy(|c| is_alphanumeric(c as u8) || c == '_'))(input)?;
     let (input, _) = multispace0(input)?;
     let is_keyword = |x: &&str| vec!["if", "else", "let", "fn"].contains(x);
-    let ident = first_char.to_string() + chars;
+    chars.insert(0, first_char);
+    let ident: String = chars.iter().collect();
     if is_keyword(&(&ident as &str)) {
         return Err(nom::Err::Error(nom::error::Error::new(
             input,
@@ -399,6 +403,10 @@ fn identifier_test() {
     assert_eq!(identifier("aA3B").unwrap().1, "aA3B".to_string());
     assert!(identifier("PA3B").is_err());
     assert_eq!(identifier("a3Bse").unwrap().1, "a3Bse".to_string());
+    assert_eq!(
+        identifier("int_to_string").unwrap().1,
+        "int_to_string".to_string()
+    );
 }
 
 pub fn parser_statement(input: &str) -> IResult<&str, Statement> {
