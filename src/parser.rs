@@ -66,7 +66,14 @@ pub fn op(input: &str) -> IResult<&str, String> {
 }
 
 pub fn term(input: &str) -> IResult<&str, Expr> {
-    alt((expr_if, lambda_fn, fun_app, dot_expr, simple_term))(input)
+    alt((
+        expr_if,
+        for_in_expr,
+        lambda_fn,
+        fun_app,
+        dot_expr,
+        simple_term,
+    ))(input)
 }
 
 pub fn simple_term(input: &str) -> IResult<&str, Expr> {
@@ -390,7 +397,7 @@ fn identifier(input: &str) -> IResult<&str, String> {
     let (input, first_char) = one_of("abcdefghijklmnopqrstuvwxyz_")(input)?;
     let (input, mut chars) = many0(satisfy(|c| is_alphanumeric(c as u8) || c == '_'))(input)?;
     let (input, _) = multispace0(input)?;
-    let is_keyword = |x: &&str| vec!["if", "else", "let", "fn"].contains(x);
+    let is_keyword = |x: &&str| vec!["if", "else", "let", "fn", "for", "in", "do"].contains(x);
     chars.insert(0, first_char);
     let ident: String = chars.iter().collect();
     if is_keyword(&(&ident as &str)) {
@@ -673,4 +680,21 @@ fn test_expr_vector() {
             Expr::EVector(vec![Expr::EInt(1), Expr::EInt(2), Expr::EInt(3)])
         ))
     );
+}
+
+pub fn for_in_expr(input: &str) -> IResult<&str, Expr> {
+    let (input, _) = symbol("for")(input)?;
+    let (input, _) = symbol("(")(input)?;
+    let (input, ident) = identifier(input)?;
+    let (input, _) = symbol("in")(input)?;
+    let (input, vec) = parser_expr(input)?;
+    let (input, _) = symbol(")")(input)?;
+    let (input, expr) = parser_expr(input)?;
+    Ok((
+        input,
+        e_fun_app(
+            e_fun_app(e_var("foreach"), Expr::EFun(ident, Box::new(expr))),
+            vec,
+        ),
+    ))
 }
