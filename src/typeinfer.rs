@@ -36,6 +36,10 @@ impl Type {
             Type::TVector(ty) => Type::TVector(Box::new(ty.simplify())),
         }
     }
+
+    fn unwrap_all(t: Rc<RefCell<Option<Type>>>) -> Type {
+        (*t).borrow().as_ref().unwrap().clone()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -378,10 +382,10 @@ fn unify(t1: &Type, t2: &Type) -> Result<(), TypeInferError> {
         (t1, t2) if t1 == t2 => Ok(()),
         (Type::TVar(n1, _), Type::TVar(n2, _)) if n1 == n2 => Ok(()),
         (Type::TVar(_, t1), t2) if (*t1).borrow().is_some() => {
-            unify(&unwrap_all(Rc::clone(t1)), t2)
+            unify(&Type::unwrap_all(Rc::clone(t1)), t2)
         }
         (t1, Type::TVar(_, t2)) if (*t2).borrow().is_some() => {
-            unify(t1, &unwrap_all(Rc::clone(t2)))
+            unify(t1, &Type::unwrap_all(Rc::clone(t2)))
         }
         (Type::TVar(n1, t1), t2) => {
             if occur(*n1, t2) {
@@ -406,10 +410,6 @@ fn unify(t1: &Type, t2: &Type) -> Result<(), TypeInferError> {
         (Type::TVector(t1), Type::TVector(t2)) => unify(t1, t2),
         (t1, t2) => Err(TypeInferError::UnifyError(t1.clone(), t2.clone())),
     }
-}
-
-fn unwrap_all(t: Rc<RefCell<Option<Type>>>) -> Type {
-    (*t).borrow().as_ref().unwrap().clone()
 }
 
 fn occur(n: u64, t: &Type) -> bool {
