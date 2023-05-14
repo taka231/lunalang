@@ -9,6 +9,7 @@ pub enum Expr {
     EString(String),
     EUnit,
     EBlockExpr(Vec<StatementOrExpr>),
+    EVector(Vec<Expr>),
 }
 
 pub fn e_int(n: i64) -> Expr {
