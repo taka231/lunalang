@@ -11,7 +11,7 @@ pub enum Type {
     TString,
     TUnit,
     TFun(Box<Type>, Box<Type>),
-    TVar(u64, Rc<RefCell<Option<Type>>>),
+    TVar(u64, Rc<RefCell<u64>>, Rc<RefCell<Option<Type>>>),
     TQVar(u64),
     TVector(Box<Type>),
 }
@@ -23,7 +23,7 @@ fn t_fun(t1: Type, t2: Type) -> Type {
 impl Type {
     fn simplify(&self) -> Self {
         match self {
-            t @ Type::TVar(n, ty) => match (**ty).borrow().clone() {
+            t @ Type::TVar(n, level, ty) => match &*Rc::clone(ty).borrow() {
                 Some(ty) => ty.simplify(),
                 None => t.clone(),
             },
@@ -35,6 +35,10 @@ impl Type {
             Type::TQVar(n) => Type::TQVar(*n),
             Type::TVector(ty) => Type::TVector(Box::new(ty.simplify())),
         }
+    }
+
+    fn unwrap_all(t: Rc<RefCell<Option<Type>>>) -> Type {
+        (*t).borrow().as_ref().unwrap().clone()
     }
 }
 
@@ -107,6 +111,7 @@ impl TypeEnv {
 pub struct TypeInfer {
     env: Rc<RefCell<TypeEnv>>,
     unassigned_num: u64,
+    level: u64,
 }
 
 impl Display for Type {
@@ -114,7 +119,7 @@ impl Display for Type {
         match self.simplify() {
             Type::TInt => write!(f, "{}", "Int"),
             Type::TBool => write!(f, "{}", "Bool"),
-            Type::TVar(n, _) => write!(f, "a{}", n),
+            Type::TVar(n, level, _) => write!(f, "_a{}({})", n, level.borrow()),
             Type::TFun(t1, t2) => write!(f, "({}) -> {}", t1, t2),
             Type::TString => write!(f, "String"),
             Type::TUnit => write!(f, "()"),
@@ -129,16 +134,22 @@ impl TypeInfer {
         TypeInfer {
             env: Rc::new(RefCell::new(TypeEnv::new())),
             unassigned_num: 0,
+            level: 0,
         }
     }
-    fn from(env: TypeEnv, unassigned_num: u64) -> Self {
+    fn from(env: TypeEnv, unassigned_num: u64, level: u64) -> Self {
         TypeInfer {
             env: Rc::new(RefCell::new(env)),
             unassigned_num,
+            level,
         }
     }
     pub fn newTVar(&mut self) -> Type {
-        let ty = Type::TVar(self.unassigned_num, Rc::new(RefCell::new(None)));
+        let ty = Type::TVar(
+            self.unassigned_num,
+            Rc::new(RefCell::new(self.level)),
+            Rc::new(RefCell::new(None)),
+        );
         self.unassigned_num += 1;
         ty
     }
@@ -172,6 +183,7 @@ impl TypeInfer {
                 let mut typeinfer = TypeInfer::from(
                     TypeEnv::new_enclosed_env(Rc::clone(&self.env)),
                     self.unassigned_num,
+                    self.level,
                 );
                 let ty = typeinfer.newTVar();
                 typeinfer
@@ -195,6 +207,7 @@ impl TypeInfer {
                 let mut typeinfer = TypeInfer::from(
                     TypeEnv::new_enclosed_env(Rc::clone(&self.env)),
                     self.unassigned_num,
+                    self.level,
                 );
                 if asts.len() > 1 {
                     for i in 0..(asts.len() - 1) {
@@ -227,14 +240,21 @@ impl TypeInfer {
             }
         }
     }
+    fn typeinfer_expr_levelup(&mut self, ast: &Expr) -> Result<Type, TypeInferError> {
+        self.level += 1;
+        let ty = self.typeinfer_expr(ast)?;
+        self.level -= 1;
+        Ok(ty)
+    }
+
     pub fn typeinfer_statement(&mut self, ast: &Statement) -> Result<(), TypeInferError> {
         match ast {
             Statement::Assign(name, e) => {
                 let ty = self.newTVar();
                 self.env.borrow_mut().insert(name.to_string(), ty.clone());
-                let inferred_ty = self.typeinfer_expr(e)?;
+                let inferred_ty = self.typeinfer_expr_levelup(e)?;
                 unify(&ty, &inferred_ty)?;
-                generalize(&ty);
+                self.generalize(&ty);
             }
         }
         Ok(())
@@ -263,11 +283,29 @@ impl TypeInfer {
                 Type::TString => Type::TString,
                 Type::TUnit => Type::TUnit,
                 Type::TFun(t1, t2) => t_fun(go(*t1, map, self_), go(*t2, map, self_)),
-                t @ Type::TVar(_, _) => t,
+                t @ Type::TVar(_, _, _) => t,
                 Type::TVector(ty) => Type::TVector(Box::new(go(*ty, map, self_))),
             }
         }
         go(ty, &mut HashMap::new(), self)
+    }
+    fn generalize(&self, ty: &Type) {
+        match ty.simplify() {
+            Type::TVar(n, level, r) if *level.borrow() > self.level => {
+                *(*r).borrow_mut() = Some(Type::TQVar(n))
+            }
+            Type::TVar(_, _, _) => (),
+            Type::TFun(t1, t2) => {
+                self.generalize(&*t1);
+                self.generalize(&*t2);
+            }
+            Type::TVector(t1) => self.generalize(&*t1),
+            Type::TInt => (),
+            Type::TBool => (),
+            Type::TString => (),
+            Type::TUnit => (),
+            Type::TQVar(_) => (),
+        }
     }
 }
 
@@ -374,28 +412,24 @@ fn typeinfer_fun_test() {
 }
 
 fn unify(t1: &Type, t2: &Type) -> Result<(), TypeInferError> {
-    match (t1, t2) {
+    match (t1.simplify(), t2.simplify()) {
         (t1, t2) if t1 == t2 => Ok(()),
-        (Type::TVar(n1, _), Type::TVar(n2, _)) if n1 == n2 => Ok(()),
-        (Type::TVar(_, t1), t2) if (*t1).borrow().is_some() => {
-            unify(&unwrap_all(Rc::clone(t1)), t2)
-        }
-        (t1, Type::TVar(_, t2)) if (*t2).borrow().is_some() => {
-            unify(t1, &unwrap_all(Rc::clone(t2)))
-        }
-        (Type::TVar(n1, t1), t2) => {
-            if occur(*n1, t2) {
-                Err(TypeInferError::OccurError(*n1, t2.clone()))
+        (Type::TVar(n1, level1, _), Type::TVar(n2, level2, _)) if n1 == n2 => Ok(()),
+        (Type::TVar(n1, level1, t1), t2) => {
+            if occur(n1, &t2) {
+                Err(TypeInferError::OccurError(n1, t2))
             } else {
-                *(*t1).borrow_mut() = Some(t2.clone());
+                level_balance(&Type::TVar(n1, level1, Rc::clone(&t1)), &t2);
+                *(*t1).borrow_mut() = Some(t2);
                 Ok(())
             }
         }
-        (t1, Type::TVar(n2, t2)) => {
-            if occur(*n2, t1) {
-                Err(TypeInferError::OccurError(*n2, t1.clone()))
+        (t1, Type::TVar(n2, level2, t2)) => {
+            if occur(n2, &t1) {
+                Err(TypeInferError::OccurError(n2, t1))
             } else {
-                *(*t2).borrow_mut() = Some(t1.clone());
+                level_balance(&t1, &Type::TVar(n2, level2, Rc::clone(&t2)));
+                *(*t2).borrow_mut() = Some(t1);
                 Ok(())
             }
         }
@@ -403,44 +437,36 @@ fn unify(t1: &Type, t2: &Type) -> Result<(), TypeInferError> {
             unify(&*tyA1, &*tyB1)?;
             unify(&*tyA2, &*tyB2)
         }
-        (Type::TVector(t1), Type::TVector(t2)) => unify(t1, t2),
+        (Type::TVector(t1), Type::TVector(t2)) => unify(&t1, &t2),
         (t1, t2) => Err(TypeInferError::UnifyError(t1.clone(), t2.clone())),
     }
 }
 
-fn unwrap_all(t: Rc<RefCell<Option<Type>>>) -> Type {
-    (*t).borrow().as_ref().unwrap().clone()
-}
-
 fn occur(n: u64, t: &Type) -> bool {
-    match (n, t) {
+    match (n, t.simplify()) {
         (_, Type::TInt) => false,
         (_, Type::TString) => false,
         (_, Type::TBool) => false,
         (_, Type::TUnit) => false,
-        (n, Type::TVar(m, _)) if n == *m => true,
-        (n, Type::TVar(_, t1)) => match *(*t1).borrow() {
-            Some(ref t1) => occur(n, t1),
-            None => false,
-        },
-        (n, Type::TFun(t1, t2)) => occur(n, t1) || occur(n, t2),
+        (n, Type::TVar(m, level, _)) if n == m => true,
+        (n, Type::TVar(_, level1, t1)) => false,
+        (n, Type::TFun(t1, t2)) => occur(n, &t1) || occur(n, &t2),
         (_, Type::TQVar(n)) => false,
-        (n, Type::TVector(ty)) => occur(n, ty),
+        (n, Type::TVector(ty)) => occur(n, &ty),
     }
 }
 
-fn generalize(ty: &Type) {
-    match ty.simplify() {
-        Type::TVar(n, r) => *(*r).borrow_mut() = Some(Type::TQVar(n)),
-        Type::TFun(t1, t2) => {
-            generalize(&*t1);
-            generalize(&*t2);
+fn level_balance(t1: &Type, t2: &Type) {
+    match (t1.simplify(), t2.simplify()) {
+        (Type::TVar(_, level1, _), Type::TVar(_, level2, _)) => {
+            let level1num: u64 = *Rc::clone(&level1).borrow();
+            let level2num: u64 = *Rc::clone(&level2).borrow();
+            if level1num > level2num {
+                *level1.borrow_mut() = level2num;
+            } else {
+                *level2.borrow_mut() = level1num;
+            }
         }
-        Type::TVector(t1) => generalize(&*t1),
-        Type::TInt => (),
-        Type::TBool => (),
-        Type::TString => (),
-        Type::TUnit => (),
-        Type::TQVar(_) => (),
+        (_, _) => (),
     }
 }
