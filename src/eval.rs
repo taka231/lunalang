@@ -13,6 +13,7 @@ pub enum Value {
     VUnit,
     VBuiltin(BuiltinFn, Vec<Value>, usize),
     VVector(Vec<Value>),
+    VRef(Rc<RefCell<Value>>),
 }
 
 type BuiltinFn = fn(Vec<Value>, Eval) -> Result<Value, EvalError>;
