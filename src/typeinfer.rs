@@ -14,6 +14,7 @@ pub enum Type {
     TVar(u64, Rc<RefCell<u64>>, Rc<RefCell<Option<Type>>>),
     TQVar(u64),
     TVector(Box<Type>),
+    TRef(Box<Type>),
 }
 
 fn t_fun(t1: Type, t2: Type) -> Type {
@@ -34,6 +35,7 @@ impl Type {
             Type::TUnit => Type::TUnit,
             Type::TQVar(n) => Type::TQVar(*n),
             Type::TVector(ty) => Type::TVector(Box::new(ty.simplify())),
+            Type::TRef(ty) => Type::TRef(Box::new(ty.simplify())),
         }
     }
 
@@ -125,6 +127,7 @@ impl Display for Type {
             Type::TUnit => write!(f, "()"),
             Type::TQVar(n) => write!(f, "a{}", n),
             Type::TVector(ty) => write!(f, "Vector[{}]", ty),
+            Type::TRef(ty) => write!(f, "Ref[{}]", ty),
         }
     }
 }
@@ -285,6 +288,7 @@ impl TypeInfer {
                 Type::TFun(t1, t2) => t_fun(go(*t1, map, self_), go(*t2, map, self_)),
                 t @ Type::TVar(_, _, _) => t,
                 Type::TVector(ty) => Type::TVector(Box::new(go(*ty, map, self_))),
+                Type::TRef(ty) => Type::TRef(Box::new(go(*ty, map, self_))),
             }
         }
         go(ty, &mut HashMap::new(), self)
@@ -305,6 +309,7 @@ impl TypeInfer {
             Type::TString => (),
             Type::TUnit => (),
             Type::TQVar(_) => (),
+            Type::TRef(ty) => self.generalize(&ty),
         }
     }
 }
@@ -438,6 +443,7 @@ fn unify(t1: &Type, t2: &Type) -> Result<(), TypeInferError> {
             unify(&*tyA2, &*tyB2)
         }
         (Type::TVector(t1), Type::TVector(t2)) => unify(&t1, &t2),
+        (Type::TRef(t1), Type::TRef(t2)) => unify(&t1, &t2),
         (t1, t2) => Err(TypeInferError::UnifyError(t1.clone(), t2.clone())),
     }
 }
@@ -453,6 +459,7 @@ fn occur(n: u64, t: &Type) -> bool {
         (n, Type::TFun(t1, t2)) => occur(n, &t1) || occur(n, &t2),
         (_, Type::TQVar(n)) => false,
         (n, Type::TVector(ty)) => occur(n, &ty),
+        (n, Type::TRef(ty)) => occur(n, &ty),
     }
 }
 
