@@ -241,6 +241,27 @@ impl TypeInfer {
                 }
                 Ok(Type::TVector(Box::new(ty)))
             }
+            Expr::EUnary(op, e) => {
+                let ty = self.typeinfer_expr(e)?;
+                match &op as &str {
+                    "-" => {
+                        unify(&Type::TInt, &ty)?;
+                        Ok(Type::TInt)
+                    }
+                    "*" => {
+                        let newtvar = self.newTVar();
+
+                        unify(&Type::TRef(Box::new(newtvar.clone())), &ty)?;
+                        Ok(newtvar)
+                    }
+                    "&" => {
+                        let newtvar = self.newTVar();
+                        unify(&newtvar, &ty)?;
+                        Ok(Type::TRef(Box::new(newtvar)))
+                    }
+                    op => Err(TypeInferError::UnimplementedOperatorError(op.to_owned())),
+                }
+            }
         }
     }
     fn typeinfer_expr_levelup(&mut self, ast: &Expr) -> Result<Type, TypeInferError> {
@@ -365,7 +386,25 @@ fn typeinfer_expr_test() {
             .typeinfer_expr(&parser_expr("[1, 2, 3]").unwrap().1)
             .map(|t| t.simplify()),
         Ok(Type::TVector(Box::new(Type::TInt)))
-    )
+    );
+    assert_eq!(
+        typeinfer
+            .typeinfer_expr(&parser_expr("-1").unwrap().1)
+            .map(|t| t.simplify()),
+        Ok(Type::TInt)
+    );
+    assert_eq!(
+        typeinfer
+            .typeinfer_expr(&parser_expr("&3").unwrap().1)
+            .map(|t| t.simplify()),
+        Ok(Type::TRef(Box::new(Type::TInt)))
+    );
+    assert_eq!(
+        typeinfer
+            .typeinfer_expr(&parser_expr("*(&1)").unwrap().1)
+            .map(|t| t.simplify()),
+        Ok(Type::TInt)
+    );
 }
 
 fn typeinfer_statements_test_helper(str: &str, name: &str, ty: Result<Type, TypeInferError>) {
