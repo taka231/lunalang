@@ -93,11 +93,47 @@ pub fn block_term(input: &str) -> IResult<&str, Expr> {
     alt((lambda_block_fn, parse_block_expr))(input)
 }
 
+pub fn unary(input: &str) -> IResult<&str, Expr> {
+    let (input, op) = opt(alt((symbol("-"), symbol("&"), symbol("*"))))(input)?;
+    let (input, e) = term(input)?;
+    match op {
+        Some(op) => Ok((input, Expr::EUnary(op.to_owned(), Box::new(e)))),
+        None => Ok((input, e)),
+    }
+}
+
+#[test]
+fn unary_test() {
+    assert_eq!(
+        parser_expr("-3"),
+        Ok(("", Expr::EUnary("-".to_owned(), Box::new(Expr::EInt(3)))))
+    );
+    assert_eq!(
+        parser_expr("*3"),
+        Ok(("", Expr::EUnary("*".to_owned(), Box::new(Expr::EInt(3)))))
+    );
+    assert_eq!(
+        parser_expr("&3"),
+        Ok(("", Expr::EUnary("&".to_owned(), Box::new(Expr::EInt(3)))))
+    );
+    assert_eq!(
+        parser_expr("-3+3"),
+        Ok((
+            "",
+            e_bin_op(
+                "+",
+                Expr::EUnary("-".to_owned(), Box::new(Expr::EInt(3))),
+                Expr::EInt(3)
+            )
+        ))
+    );
+}
+
 pub fn expr_op_7l(input: &str) -> IResult<&str, Expr> {
-    let (input, e1) = term(input)?;
+    let (input, e1) = unary(input)?;
     let (input, e2) = many0(|input| {
         let (input, op) = alt((symbol("*"), symbol("/"), symbol("%")))(input)?;
-        let (input, ex) = term(input)?;
+        let (input, ex) = unary(input)?;
         Ok((input, (op, ex)))
     })(input)?;
     Ok((
