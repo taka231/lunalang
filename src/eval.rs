@@ -224,6 +224,27 @@ impl Eval {
                 }
                 Ok(Value::VVector(vvec))
             }
+            Expr::EUnary(op, e) => match &op as &str {
+                "-" => {
+                    let e = self.eval_expr(*e)?;
+                    match e {
+                        Value::VInt(n) => Ok(Value::VInt(-n)),
+                        _ => Err(EvalError::InternalTypeError),
+                    }
+                }
+                "&" => {
+                    let e = self.eval_expr(*e)?;
+                    Ok(Value::VRef(Rc::new(RefCell::new(e))))
+                }
+                "*" => {
+                    let e = self.eval_expr(*e)?;
+                    match e {
+                        Value::VRef(e) => Ok(e.borrow().clone()),
+                        _ => Err(EvalError::InternalTypeError),
+                    }
+                }
+                _ => Err(EvalError::UnimplementedOperatorError(op)),
+            },
         }
     }
     pub fn eval_statement(&self, ast: Statement) -> Result<(), EvalError> {
@@ -287,6 +308,8 @@ fn test_op_expr() {
     test_eval_expr_helper("2==3", Ok(v_bool(false)));
     test_eval_expr_helper("2!=3", Ok(v_bool(true)));
     test_eval_expr_helper("4%3", Ok(v_int(1)));
+    test_eval_expr_helper("&3", Ok(Value::VRef(Rc::new(RefCell::new(Value::VInt(3))))));
+    test_eval_expr_helper("*(&3)", Ok(Value::VInt(3)));
 }
 
 #[test]
