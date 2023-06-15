@@ -170,6 +170,12 @@ impl TypeInfer {
                     unify(&Type::TInt, &self.typeinfer_expr(e2)?)?;
                     Ok(Type::TBool)
                 }
+                ":=" => {
+                    let ty = self.newTVar();
+                    unify(&Type::TRef(Box::new(ty.clone())), &self.typeinfer_expr(e1)?)?;
+                    unify(&ty, &self.typeinfer_expr(e2)?)?;
+                    Ok(Type::TUnit)
+                }
                 _ => Err(TypeInferError::UnimplementedOperatorError(op.clone())),
             },
             Expr::EIf(cond, e1, e2) => {
@@ -404,6 +410,12 @@ fn typeinfer_expr_test() {
             .typeinfer_expr(&parser_expr("*(&1)").unwrap().1)
             .map(|t| t.simplify()),
         Ok(Type::TInt)
+    );
+    assert_eq!(
+        typeinfer
+            .typeinfer_expr(&parser_expr("&3:=4").unwrap().1)
+            .map(|t| t.simplify()),
+        Ok(Type::TUnit)
     );
 }
 

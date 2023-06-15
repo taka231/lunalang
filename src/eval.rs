@@ -172,6 +172,13 @@ impl Eval {
                         "!=" => Ok(v_bool(n1 != n2)),
                         _ => Err(EvalError::UnimplementedOperatorError(op)),
                     },
+                    (Value::VRef(v1), v2) => match &op as &str {
+                        ":=" => {
+                            *v1.borrow_mut() = v2;
+                            Ok(Value::VUnit)
+                        }
+                        _ => Err(EvalError::UnimplementedOperatorError(op)),
+                    },
                     (_, _) => Err(EvalError::InternalTypeError),
                 }
             }
@@ -375,4 +382,19 @@ fn test_recursive_function() {
 #[test]
 fn test_vector() {
     test_eval_expr_helper("[1, 2]", Ok(Value::VVector(vec![v_int(1), v_int(2)])))
+}
+
+#[test]
+fn test_ref() {
+    test_eval_statements_helper(
+        "let sum(vec) = {
+  let sum = &0;
+  for (v in vec) {
+    sum := *sum + v;
+  };
+  *sum;
+};
+let main = sum([1..=100]);",
+        Ok(Value::VInt(5050)),
+    )
 }

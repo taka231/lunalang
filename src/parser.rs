@@ -177,6 +177,19 @@ pub fn expr_op_4n(input: &str) -> IResult<&str, Expr> {
     }
 }
 
+pub fn expr_op_0n(input: &str) -> IResult<&str, Expr> {
+    let (input, e1) = expr_op_4n(input)?;
+    let (input, optional) = opt(|input| {
+        let (input, op) = alt((tag(":="),))(input)?;
+        let (input, e2) = expr_op_4n(input)?;
+        Ok((input, (op, e2)))
+    })(input)?;
+    match optional {
+        Some((op, e2)) => Ok((input, e_bin_op(op, e1, e2))),
+        None => Ok((input, e1)),
+    }
+}
+
 #[test]
 fn test_expr_op() {
     assert_eq!(
@@ -211,6 +224,10 @@ fn test_expr_op() {
             "",
             e_bin_op("<", e_int(1), e_bin_op("+", e_int(1), e_int(1)))
         ))
+    );
+    assert_eq!(
+        parser_expr("a:=3"),
+        Ok(("", e_bin_op(":=", e_var("a"), e_int(3))))
     );
     assert_eq!(
         parser_expr("a+b"),
@@ -501,7 +518,7 @@ fn parser_statements_test() {
 }
 
 pub fn parser_expr<'a>(input: &'a str) -> IResult<&'a str, Expr> {
-    let (input, expr) = expr_op_4n(input)?;
+    let (input, expr) = expr_op_0n(input)?;
     Ok((input, expr))
 }
 
