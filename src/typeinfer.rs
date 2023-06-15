@@ -14,6 +14,7 @@ pub enum Type {
     TVar(u64, Rc<RefCell<u64>>, Rc<RefCell<Option<Type>>>),
     TQVar(u64),
     TVector(Box<Type>),
+    TRef(Box<Type>),
 }
 
 fn t_fun(t1: Type, t2: Type) -> Type {
@@ -34,6 +35,7 @@ impl Type {
             Type::TUnit => Type::TUnit,
             Type::TQVar(n) => Type::TQVar(*n),
             Type::TVector(ty) => Type::TVector(Box::new(ty.simplify())),
+            Type::TRef(ty) => Type::TRef(Box::new(ty.simplify())),
         }
     }
 
@@ -125,6 +127,7 @@ impl Display for Type {
             Type::TUnit => write!(f, "()"),
             Type::TQVar(n) => write!(f, "a{}", n),
             Type::TVector(ty) => write!(f, "Vector[{}]", ty),
+            Type::TRef(ty) => write!(f, "Ref[{}]", ty),
         }
     }
 }
@@ -166,6 +169,12 @@ impl TypeInfer {
                     unify(&Type::TInt, &self.typeinfer_expr(e1)?)?;
                     unify(&Type::TInt, &self.typeinfer_expr(e2)?)?;
                     Ok(Type::TBool)
+                }
+                ":=" => {
+                    let ty = self.newTVar();
+                    unify(&Type::TRef(Box::new(ty.clone())), &self.typeinfer_expr(e1)?)?;
+                    unify(&ty, &self.typeinfer_expr(e2)?)?;
+                    Ok(Type::TUnit)
                 }
                 _ => Err(TypeInferError::UnimplementedOperatorError(op.clone())),
             },
@@ -238,6 +247,27 @@ impl TypeInfer {
                 }
                 Ok(Type::TVector(Box::new(ty)))
             }
+            Expr::EUnary(op, e) => {
+                let ty = self.typeinfer_expr(e)?;
+                match &op as &str {
+                    "-" => {
+                        unify(&Type::TInt, &ty)?;
+                        Ok(Type::TInt)
+                    }
+                    "*" => {
+                        let newtvar = self.newTVar();
+
+                        unify(&Type::TRef(Box::new(newtvar.clone())), &ty)?;
+                        Ok(newtvar)
+                    }
+                    "&" => {
+                        let newtvar = self.newTVar();
+                        unify(&newtvar, &ty)?;
+                        Ok(Type::TRef(Box::new(newtvar)))
+                    }
+                    op => Err(TypeInferError::UnimplementedOperatorError(op.to_owned())),
+                }
+            }
         }
     }
     fn typeinfer_expr_levelup(&mut self, ast: &Expr) -> Result<Type, TypeInferError> {
@@ -285,6 +315,7 @@ impl TypeInfer {
                 Type::TFun(t1, t2) => t_fun(go(*t1, map, self_), go(*t2, map, self_)),
                 t @ Type::TVar(_, _, _) => t,
                 Type::TVector(ty) => Type::TVector(Box::new(go(*ty, map, self_))),
+                Type::TRef(ty) => Type::TRef(Box::new(go(*ty, map, self_))),
             }
         }
         go(ty, &mut HashMap::new(), self)
@@ -305,6 +336,7 @@ impl TypeInfer {
             Type::TString => (),
             Type::TUnit => (),
             Type::TQVar(_) => (),
+            Type::TRef(ty) => self.generalize(&ty),
         }
     }
 }
@@ -360,7 +392,31 @@ fn typeinfer_expr_test() {
             .typeinfer_expr(&parser_expr("[1, 2, 3]").unwrap().1)
             .map(|t| t.simplify()),
         Ok(Type::TVector(Box::new(Type::TInt)))
-    )
+    );
+    assert_eq!(
+        typeinfer
+            .typeinfer_expr(&parser_expr("-1").unwrap().1)
+            .map(|t| t.simplify()),
+        Ok(Type::TInt)
+    );
+    assert_eq!(
+        typeinfer
+            .typeinfer_expr(&parser_expr("&3").unwrap().1)
+            .map(|t| t.simplify()),
+        Ok(Type::TRef(Box::new(Type::TInt)))
+    );
+    assert_eq!(
+        typeinfer
+            .typeinfer_expr(&parser_expr("*(&1)").unwrap().1)
+            .map(|t| t.simplify()),
+        Ok(Type::TInt)
+    );
+    assert_eq!(
+        typeinfer
+            .typeinfer_expr(&parser_expr("&3:=4").unwrap().1)
+            .map(|t| t.simplify()),
+        Ok(Type::TUnit)
+    );
 }
 
 fn typeinfer_statements_test_helper(str: &str, name: &str, ty: Result<Type, TypeInferError>) {
@@ -438,6 +494,7 @@ fn unify(t1: &Type, t2: &Type) -> Result<(), TypeInferError> {
             unify(&*tyA2, &*tyB2)
         }
         (Type::TVector(t1), Type::TVector(t2)) => unify(&t1, &t2),
+        (Type::TRef(t1), Type::TRef(t2)) => unify(&t1, &t2),
         (t1, t2) => Err(TypeInferError::UnifyError(t1.clone(), t2.clone())),
     }
 }
@@ -453,6 +510,7 @@ fn occur(n: u64, t: &Type) -> bool {
         (n, Type::TFun(t1, t2)) => occur(n, &t1) || occur(n, &t2),
         (_, Type::TQVar(n)) => false,
         (n, Type::TVector(ty)) => occur(n, &ty),
+        (n, Type::TRef(ty)) => occur(n, &ty),
     }
 }
 

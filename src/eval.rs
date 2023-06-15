@@ -13,6 +13,7 @@ pub enum Value {
     VUnit,
     VBuiltin(BuiltinFn, Vec<Value>, usize),
     VVector(Vec<Value>),
+    VRef(Rc<RefCell<Value>>),
 }
 
 type BuiltinFn = fn(Vec<Value>, Eval) -> Result<Value, EvalError>;
@@ -171,6 +172,13 @@ impl Eval {
                         "!=" => Ok(v_bool(n1 != n2)),
                         _ => Err(EvalError::UnimplementedOperatorError(op)),
                     },
+                    (Value::VRef(v1), v2) => match &op as &str {
+                        ":=" => {
+                            *v1.borrow_mut() = v2;
+                            Ok(Value::VUnit)
+                        }
+                        _ => Err(EvalError::UnimplementedOperatorError(op)),
+                    },
                     (_, _) => Err(EvalError::InternalTypeError),
                 }
             }
@@ -223,6 +231,27 @@ impl Eval {
                 }
                 Ok(Value::VVector(vvec))
             }
+            Expr::EUnary(op, e) => match &op as &str {
+                "-" => {
+                    let e = self.eval_expr(*e)?;
+                    match e {
+                        Value::VInt(n) => Ok(Value::VInt(-n)),
+                        _ => Err(EvalError::InternalTypeError),
+                    }
+                }
+                "&" => {
+                    let e = self.eval_expr(*e)?;
+                    Ok(Value::VRef(Rc::new(RefCell::new(e))))
+                }
+                "*" => {
+                    let e = self.eval_expr(*e)?;
+                    match e {
+                        Value::VRef(e) => Ok(e.borrow().clone()),
+                        _ => Err(EvalError::InternalTypeError),
+                    }
+                }
+                _ => Err(EvalError::UnimplementedOperatorError(op)),
+            },
         }
     }
     pub fn eval_statement(&self, ast: Statement) -> Result<(), EvalError> {
@@ -286,6 +315,8 @@ fn test_op_expr() {
     test_eval_expr_helper("2==3", Ok(v_bool(false)));
     test_eval_expr_helper("2!=3", Ok(v_bool(true)));
     test_eval_expr_helper("4%3", Ok(v_int(1)));
+    test_eval_expr_helper("&3", Ok(Value::VRef(Rc::new(RefCell::new(Value::VInt(3))))));
+    test_eval_expr_helper("*(&3)", Ok(Value::VInt(3)));
 }
 
 #[test]
@@ -351,4 +382,19 @@ fn test_recursive_function() {
 #[test]
 fn test_vector() {
     test_eval_expr_helper("[1, 2]", Ok(Value::VVector(vec![v_int(1), v_int(2)])))
+}
+
+#[test]
+fn test_ref() {
+    test_eval_statements_helper(
+        "let sum(vec) = {
+  let sum = &0;
+  for (v in vec) {
+    sum := *sum + v;
+  };
+  *sum;
+};
+let main = sum([1..=100]);",
+        Ok(Value::VInt(5050)),
+    )
 }

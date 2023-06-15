@@ -66,14 +66,7 @@ pub fn op(input: &str) -> IResult<&str, String> {
 }
 
 pub fn term(input: &str) -> IResult<&str, Expr> {
-    alt((
-        expr_if,
-        for_in_expr,
-        lambda_fn,
-        fun_app,
-        dot_expr,
-        simple_term,
-    ))(input)
+    alt((expr_if, for_in_expr, lambda_fn, dot_expr, simple_term))(input)
 }
 
 pub fn simple_term(input: &str) -> IResult<&str, Expr> {
@@ -100,11 +93,47 @@ pub fn block_term(input: &str) -> IResult<&str, Expr> {
     alt((lambda_block_fn, parse_block_expr))(input)
 }
 
+pub fn unary(input: &str) -> IResult<&str, Expr> {
+    let (input, op) = opt(alt((symbol("-"), symbol("&"), symbol("*"))))(input)?;
+    let (input, e) = term(input)?;
+    match op {
+        Some(op) => Ok((input, Expr::EUnary(op.to_owned(), Box::new(e)))),
+        None => Ok((input, e)),
+    }
+}
+
+#[test]
+fn unary_test() {
+    assert_eq!(
+        parser_expr("-3"),
+        Ok(("", Expr::EUnary("-".to_owned(), Box::new(Expr::EInt(3)))))
+    );
+    assert_eq!(
+        parser_expr("*3"),
+        Ok(("", Expr::EUnary("*".to_owned(), Box::new(Expr::EInt(3)))))
+    );
+    assert_eq!(
+        parser_expr("&3"),
+        Ok(("", Expr::EUnary("&".to_owned(), Box::new(Expr::EInt(3)))))
+    );
+    assert_eq!(
+        parser_expr("-3+3"),
+        Ok((
+            "",
+            e_bin_op(
+                "+",
+                Expr::EUnary("-".to_owned(), Box::new(Expr::EInt(3))),
+                Expr::EInt(3)
+            )
+        ))
+    );
+}
+
 pub fn expr_op_7l(input: &str) -> IResult<&str, Expr> {
-    let (input, e1) = term(input)?;
+    let (input, e1) = unary(input)?;
     let (input, e2) = many0(|input| {
         let (input, op) = alt((symbol("*"), symbol("/"), symbol("%")))(input)?;
-        let (input, ex) = term(input)?;
+        let (input, ex) = unary(input)?;
         Ok((input, (op, ex)))
     })(input)?;
     Ok((
@@ -148,6 +177,19 @@ pub fn expr_op_4n(input: &str) -> IResult<&str, Expr> {
     }
 }
 
+pub fn expr_op_0n(input: &str) -> IResult<&str, Expr> {
+    let (input, e1) = expr_op_4n(input)?;
+    let (input, optional) = opt(|input| {
+        let (input, op) = alt((tag(":="),))(input)?;
+        let (input, e2) = expr_op_4n(input)?;
+        Ok((input, (op, e2)))
+    })(input)?;
+    match optional {
+        Some((op, e2)) => Ok((input, e_bin_op(op, e1, e2))),
+        None => Ok((input, e1)),
+    }
+}
+
 #[test]
 fn test_expr_op() {
     assert_eq!(
@@ -182,6 +224,10 @@ fn test_expr_op() {
             "",
             e_bin_op("<", e_int(1), e_bin_op("+", e_int(1), e_int(1)))
         ))
+    );
+    assert_eq!(
+        parser_expr("a:=3"),
+        Ok(("", e_bin_op(":=", e_var("a"), e_int(3))))
     );
     assert_eq!(
         parser_expr("a+b"),
@@ -241,38 +287,30 @@ pub fn expr_if(input: &str) -> IResult<&str, Expr> {
 
 pub fn fun_app(input: &str) -> IResult<&str, Expr> {
     let (input, e) = simple_term(input)?;
-    let (input, args) = alt((
-        |input| {
-            let (input, _) = symbol("(")(input)?;
-            let (input, mut args) = separated_list0(symbol(","), parser_expr)(input)?;
-            let (input, _) = symbol(")")(input)?;
-            let (input, optarg) = opt(block_term)(input)?;
-            match optarg {
-                Some(arg) => args.push(arg),
-                None => (),
-            };
-            Ok((input, args))
-        },
-        |input| {
-            let (input, arg) = block_term(input)?;
-            Ok((input, vec![arg]))
-        },
-    ))(input)?;
-    Ok((
-        input,
-        args.iter()
-            .fold(e, |acc, expr| e_fun_app(acc, expr.clone())),
-    ))
+    let (input, args) = opt(alt((|input| {
+        let (input, _) = symbol("(")(input)?;
+        let (input, args) = separated_list0(symbol(","), parser_expr)(input)?;
+        let (input, _) = symbol(")")(input)?;
+        Ok((input, args))
+    },)))(input)?;
+    match args {
+        None => Ok((input, e)),
+        Some(args) => Ok((
+            input,
+            args.iter()
+                .fold(e, |acc, expr| e_fun_app(acc, expr.clone())),
+        )),
+    }
 }
 
 #[test]
 fn fun_app_test() {
     assert_eq!(
-        fun_app("add(2, 3)").unwrap().1,
+        dot_expr("add(2, 3)").unwrap().1,
         e_fun_app(e_fun_app(e_var("add"), e_int(2)), e_int(3)),
     );
     assert_eq!(
-        fun_app("{add;}(2, 3)").unwrap().1,
+        dot_expr("{add;}(2, 3)").unwrap().1,
         e_fun_app(
             e_fun_app(
                 Expr::EBlockExpr(vec![StatementOrExpr::Expr(e_var("add"))]),
@@ -282,7 +320,7 @@ fn fun_app_test() {
         ),
     );
     assert_eq!(
-        fun_app("add(2) {3;}").unwrap().1,
+        dot_expr("add(2) {3;}").unwrap().1,
         e_fun_app(
             e_fun_app(e_var("add"), e_int(2)),
             Expr::EBlockExpr(vec![StatementOrExpr::Expr(e_int(3))])
@@ -480,7 +518,7 @@ fn parser_statements_test() {
 }
 
 pub fn parser_expr<'a>(input: &'a str) -> IResult<&'a str, Expr> {
-    let (input, expr) = expr_op_4n(input)?;
+    let (input, expr) = expr_op_0n(input)?;
     Ok((input, expr))
 }
 
@@ -512,8 +550,8 @@ pub fn parser_for_repl(input: &str) -> IResult<&str, StatementOrExpr> {
 }
 
 pub fn dot_expr(input: &str) -> IResult<&str, Expr> {
-    let (input, mut expr) = simple_term(input)?;
-    let (input, mut temp_exprs) = many1(|input| {
+    let (input, mut expr) = fun_app(input)?;
+    let (input, mut temp_exprs) = many0(|input| {
         let (input, _) = symbol(".")(input)?;
         let (input, ident) = identifier(input)?;
         let (input, args) = opt(|input| {
@@ -533,6 +571,9 @@ pub fn dot_expr(input: &str) -> IResult<&str, Expr> {
     match opt_expr {
         None => (),
         Some(e) => {
+            if temp_exprs.len() == 0 {
+                return Ok((input, e_fun_app(expr, e)));
+            }
             let len = temp_exprs.len();
             temp_exprs[len - 1] = e_fun_app(temp_exprs[len - 1].clone(), e)
         }
@@ -558,6 +599,16 @@ fn test_dot_expr() {
         Ok((
             "",
             e_fun_app(e_fun_app(e_var("add"), Expr::EInt(2)), Expr::EInt(3))
+        ))
+    );
+    assert_eq!(
+        dot_expr("add(2, 3).inc"),
+        Ok((
+            "",
+            e_fun_app(
+                e_var("inc"),
+                e_fun_app(e_fun_app(e_var("add"), Expr::EInt(2)), Expr::EInt(3))
+            )
         ))
     );
     assert_eq!(

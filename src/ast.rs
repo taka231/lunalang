@@ -2,6 +2,7 @@
 pub enum Expr {
     EInt(i64),
     EBinOp(String, Box<Expr>, Box<Expr>),
+    EUnary(String, Box<Expr>),
     EIf(Box<Expr>, Box<Expr>, Box<Expr>),
     EVar(String),
     EFun(String, Box<Expr>),
