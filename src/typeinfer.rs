@@ -10,6 +10,7 @@ pub enum Type {
     TBool,
     TString,
     TUnit,
+    TType(String),
     TFun(Box<Type>, Box<Type>),
     TVar(u64, Rc<RefCell<u64>>, Rc<RefCell<Option<Type>>>),
     TQVar(u64),

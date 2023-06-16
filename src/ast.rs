@@ -1,3 +1,5 @@
+use crate::typeinfer::Type;
+
 #[derive(PartialEq, Eq, Debug, Clone)]
 pub enum Expr {
     EInt(i64),
@@ -44,6 +46,13 @@ pub fn e_string(str: &str) -> Expr {
 #[derive(PartialEq, Eq, Debug, Clone)]
 pub enum Statement {
     Assign(String, Expr),
+    TypeDef(String, Vec<ConstructorDef>),
+}
+
+#[derive(PartialEq, Eq, Debug, Clone)]
+pub struct ConstructorDef {
+    pub name: String,
+    pub args: Vec<Type>,
 }
 
 pub type Statements = Vec<Statement>;
