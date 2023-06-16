@@ -1,6 +1,9 @@
-use crate::ast::{
-    self, e_bin_op, e_fun, e_fun_app, e_if, e_int, e_string, e_var, Expr, Statement,
-    StatementOrExpr, Statements,
+use crate::{
+    ast::{
+        self, e_bin_op, e_fun, e_fun_app, e_if, e_int, e_string, e_var, ConstructorDef, Expr,
+        Statement, StatementOrExpr, Statements,
+    },
+    typeinfer::Type,
 };
 use nom::{
     branch::alt,
@@ -13,7 +16,7 @@ use nom::{
     },
     combinator::{eof, fail, map_res, opt, value},
     error::ParseError,
-    multi::{many0, many1, separated_list0},
+    multi::{many0, many1, separated_list0, separated_list1},
     sequence::delimited,
     IResult,
 };
@@ -82,7 +85,7 @@ pub fn simple_term(input: &str) -> IResult<&str, Expr> {
         expr_vector,
         delimited(symbol("("), parser_expr, symbol(")")),
         |input| {
-            let (input, ident) = identifier(input)?;
+            let (input, ident) = alt((identifier, identifier_start_with_capital))(input)?;
             Ok((input, Expr::EVar(ident)))
         },
         expr_string,
@@ -404,6 +407,59 @@ fn statement_assign_test() {
     );
 }
 
+pub fn statement_typedef(input: &str) -> IResult<&str, Statement> {
+    let (input, _) = keyword("enum")(input)?;
+    let (input, id) = identifier_start_with_capital(input)?;
+    let (input, _) = symbol("{")(input)?;
+    let (input, constructors) = separated_list0(symbol(","), |input| {
+        let (input, name) = identifier_start_with_capital(input)?;
+        let (input, args) = opt(|input| {
+            let (input, _) = symbol("(")(input)?;
+            let (input, args) = separated_list0(symbol(","), parser_type)(input)?;
+            let (input, _) = symbol(")")(input)?;
+            Ok((input, args))
+        })(input)?;
+        match args {
+            Some(args) => Ok((input, ConstructorDef { name, args })),
+            None => Ok((input, ConstructorDef { name, args: vec![] })),
+        }
+    })(input)?;
+    let (input, _) = symbol("}")(input)?;
+    let (input, _) = symbol(";")(input)?;
+    Ok((input, Statement::TypeDef(id, constructors)))
+}
+
+#[test]
+fn statement_typedef_test() {
+    assert_eq!(
+        statement_typedef("enum Hoge {Foo(Bar, Huga), Huge};"),
+        Ok((
+            "",
+            Statement::TypeDef(
+                "Hoge".to_owned(),
+                vec![
+                    ConstructorDef {
+                        name: "Foo".to_owned(),
+                        args: vec![
+                            Type::TType("Bar".to_owned()),
+                            Type::TType("Huga".to_owned())
+                        ]
+                    },
+                    ConstructorDef {
+                        name: "Huge".to_owned(),
+                        args: vec![]
+                    }
+                ]
+            )
+        ))
+    )
+}
+
+pub fn parser_type(input: &str) -> IResult<&str, Type> {
+    let (input, id) = identifier_start_with_capital(input)?;
+    Ok((input, Type::TType(id)))
+}
+
 pub fn fun_def(input: &str) -> IResult<&str, Statement> {
     let (input, _) = keyword("let")(input)?;
     let (input, id) = identifier(input)?;
@@ -436,7 +492,8 @@ fn identifier(input: &str) -> IResult<&str, String> {
     let (input, first_char) = one_of("abcdefghijklmnopqrstuvwxyz_")(input)?;
     let (input, mut chars) = many0(satisfy(|c| is_alphanumeric(c as u8) || c == '_'))(input)?;
     let (input, _) = multispace0(input)?;
-    let is_keyword = |x: &&str| vec!["if", "else", "let", "fn", "for", "in", "do"].contains(x);
+    let is_keyword =
+        |x: &&str| vec!["if", "else", "let", "fn", "for", "in", "do", "enum"].contains(x);
     chars.insert(0, first_char);
     let ident: String = chars.iter().collect();
     if is_keyword(&(&ident as &str)) {
@@ -459,8 +516,18 @@ fn identifier_test() {
     );
 }
 
+pub fn identifier_start_with_capital(input: &str) -> IResult<&str, String> {
+    let (input, _) = multispace0(input)?;
+    let (input, first_char) = one_of("ABCDEFGHIJKLMNOPQRSTUVWXYZ")(input)?;
+    let (input, mut chars) = many0(satisfy(|c| is_alphanumeric(c as u8) || c == '_'))(input)?;
+    let (input, _) = multispace0(input)?;
+    chars.insert(0, first_char);
+    let ident: String = chars.iter().collect();
+    Ok((input, ident))
+}
+
 pub fn parser_statement(input: &str) -> IResult<&str, Statement> {
-    let (input, statement) = alt((fun_def, statement_assign))(input)?;
+    let (input, statement) = alt((fun_def, statement_assign, statement_typedef))(input)?;
     Ok((input, statement))
 }
 
@@ -553,7 +620,7 @@ pub fn dot_expr(input: &str) -> IResult<&str, Expr> {
     let (input, mut expr) = fun_app(input)?;
     let (input, mut temp_exprs) = many0(|input| {
         let (input, _) = symbol(".")(input)?;
-        let (input, ident) = identifier(input)?;
+        let (input, ident) = alt((identifier, identifier_start_with_capital))(input)?;
         let (input, args) = opt(|input| {
             let (input, _) = symbol("(")(input)?;
             let (input, args) = separated_list0(symbol(","), parser_expr)(input)?;
