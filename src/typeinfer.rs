@@ -1,4 +1,4 @@
-use crate::ast::{Expr, Statement, StatementOrExpr, Statements};
+use crate::ast::{ConstructorDef, Expr, Statement, StatementOrExpr, Statements};
 use crate::error::TypeInferError;
 use std::collections::HashMap;
 use std::fmt::write;
@@ -6,16 +6,18 @@ use std::{cell::RefCell, fmt::Display, rc::Rc};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Type {
-    TInt,
-    TBool,
-    TString,
-    TUnit,
     TType(String),
     TFun(Box<Type>, Box<Type>),
     TVar(u64, Rc<RefCell<u64>>, Rc<RefCell<Option<Type>>>),
     TQVar(u64),
     TVector(Box<Type>),
     TRef(Box<Type>),
+}
+
+impl Type {
+    fn ttype(ty: impl Into<String>) -> Type {
+        Type::TType(ty.into())
+    }
 }
 
 fn t_fun(t1: Type, t2: Type) -> Type {
@@ -30,13 +32,10 @@ impl Type {
                 None => t.clone(),
             },
             Type::TFun(t1, t2) => t_fun(t1.simplify(), t2.simplify()),
-            Type::TInt => Type::TInt,
-            Type::TBool => Type::TBool,
-            Type::TString => Type::TString,
-            Type::TUnit => Type::TUnit,
             Type::TQVar(n) => Type::TQVar(*n),
             Type::TVector(ty) => Type::TVector(Box::new(ty.simplify())),
             Type::TRef(ty) => Type::TRef(Box::new(ty.simplify())),
+            Type::TType(ty) => Type::TType(ty.to_owned()),
         }
     }
 
@@ -84,27 +83,39 @@ impl TypeEnv {
     }
     fn builtin() -> HashMap<String, Type> {
         let mut builtin = HashMap::new();
-        builtin.insert("puts".to_owned(), t_fun(Type::TString, Type::TUnit));
+        builtin.insert(
+            "puts".to_owned(),
+            t_fun(Type::ttype("String"), Type::ttype("()")),
+        );
         builtin.insert(
             "foreach".to_owned(),
             t_fun(
-                t_fun(Type::TQVar(0), Type::TUnit),
-                t_fun(Type::TVector(Box::new(Type::TQVar(0))), Type::TUnit),
+                t_fun(Type::TQVar(0), Type::ttype("()")),
+                t_fun(Type::TVector(Box::new(Type::TQVar(0))), Type::ttype("()")),
             ),
         );
-        builtin.insert("int_to_string".to_owned(), t_fun(Type::TInt, Type::TString));
+        builtin.insert(
+            "int_to_string".to_owned(),
+            t_fun(Type::ttype("Int"), Type::ttype("String")),
+        );
         builtin.insert(
             "enum_from_until".to_owned(),
             t_fun(
-                Type::TInt,
-                t_fun(Type::TInt, Type::TVector(Box::new(Type::TInt))),
+                Type::ttype("Int"),
+                t_fun(
+                    Type::ttype("Int"),
+                    Type::TVector(Box::new(Type::ttype("Int"))),
+                ),
             ),
         );
         builtin.insert(
             "enum_from_to".to_owned(),
             t_fun(
-                Type::TInt,
-                t_fun(Type::TInt, Type::TVector(Box::new(Type::TInt))),
+                Type::ttype("Int"),
+                t_fun(
+                    Type::ttype("Int"),
+                    Type::TVector(Box::new(Type::ttype("Int"))),
+                ),
             ),
         );
         builtin
@@ -120,15 +131,12 @@ pub struct TypeInfer {
 impl Display for Type {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.simplify() {
-            Type::TInt => write!(f, "{}", "Int"),
-            Type::TBool => write!(f, "{}", "Bool"),
             Type::TVar(n, level, _) => write!(f, "_a{}({})", n, level.borrow()),
             Type::TFun(t1, t2) => write!(f, "({}) -> {}", t1, t2),
-            Type::TString => write!(f, "String"),
-            Type::TUnit => write!(f, "()"),
             Type::TQVar(n) => write!(f, "a{}", n),
             Type::TVector(ty) => write!(f, "Vector[{}]", ty),
             Type::TRef(ty) => write!(f, "Ref[{}]", ty),
+            Type::TType(ty) => write!(f, "{}", ty),
         }
     }
 }
@@ -159,28 +167,28 @@ impl TypeInfer {
     }
     pub fn typeinfer_expr(&mut self, ast: &Expr) -> Result<Type, TypeInferError> {
         match ast {
-            Expr::EInt(_) => Ok(Type::TInt),
+            Expr::EInt(_) => Ok(Type::ttype("Int")),
             Expr::EBinOp(op, e1, e2) => match &op as &str {
                 "+" | "-" | "*" | "/" | "%" => {
-                    unify(&Type::TInt, &self.typeinfer_expr(e1)?)?;
-                    unify(&Type::TInt, &self.typeinfer_expr(e2)?)?;
-                    Ok(Type::TInt)
+                    unify(&Type::ttype("Int"), &self.typeinfer_expr(e1)?)?;
+                    unify(&Type::ttype("Int"), &self.typeinfer_expr(e2)?)?;
+                    Ok(Type::ttype("Int"))
                 }
                 "<" | ">" | "<=" | ">=" | "==" | "!=" => {
-                    unify(&Type::TInt, &self.typeinfer_expr(e1)?)?;
-                    unify(&Type::TInt, &self.typeinfer_expr(e2)?)?;
-                    Ok(Type::TBool)
+                    unify(&Type::ttype("Int"), &self.typeinfer_expr(e1)?)?;
+                    unify(&Type::ttype("Int"), &self.typeinfer_expr(e2)?)?;
+                    Ok(Type::ttype("Bool"))
                 }
                 ":=" => {
                     let ty = self.newTVar();
                     unify(&Type::TRef(Box::new(ty.clone())), &self.typeinfer_expr(e1)?)?;
                     unify(&ty, &self.typeinfer_expr(e2)?)?;
-                    Ok(Type::TUnit)
+                    Ok(Type::ttype("()"))
                 }
                 _ => Err(TypeInferError::UnimplementedOperatorError(op.clone())),
             },
             Expr::EIf(cond, e1, e2) => {
-                unify(&Type::TBool, &self.typeinfer_expr(cond)?)?;
+                unify(&Type::ttype("Bool"), &self.typeinfer_expr(cond)?)?;
                 let t = self.typeinfer_expr(e1)?;
                 unify(&t, &self.typeinfer_expr(e2)?)?;
                 Ok(t)
@@ -211,8 +219,8 @@ impl TypeInfer {
                 unify(&t1, &t_fun(t2, t3.clone()))?;
                 Ok(t3)
             }
-            Expr::EString(_) => Ok(Type::TString),
-            Expr::EUnit => Ok(Type::TUnit),
+            Expr::EString(_) => Ok(Type::ttype("String")),
+            Expr::EUnit => Ok(Type::ttype("()")),
             Expr::EBlockExpr(asts) => {
                 let mut typeinfer = TypeInfer::from(
                     TypeEnv::new_enclosed_env(Rc::clone(&self.env)),
@@ -235,7 +243,7 @@ impl TypeInfer {
                     StatementOrExpr::Expr(e) => typeinfer.typeinfer_expr(&e)?,
                     StatementOrExpr::Statement(stmt) => {
                         typeinfer.typeinfer_statement(&stmt)?;
-                        Type::TUnit
+                        Type::ttype("()")
                     }
                 };
                 self.unassigned_num = typeinfer.unassigned_num;
@@ -252,8 +260,8 @@ impl TypeInfer {
                 let ty = self.typeinfer_expr(e)?;
                 match &op as &str {
                     "-" => {
-                        unify(&Type::TInt, &ty)?;
-                        Ok(Type::TInt)
+                        unify(&Type::ttype("Int"), &ty)?;
+                        Ok(Type::ttype("Int"))
                     }
                     "*" => {
                         let newtvar = self.newTVar();
@@ -287,6 +295,16 @@ impl TypeInfer {
                 unify(&ty, &inferred_ty)?;
                 self.generalize(&ty);
             }
+            Statement::TypeDef(type_name, constructor_def_vec) => {
+                for ConstructorDef { name, args } in constructor_def_vec {
+                    self.env.borrow_mut().insert(
+                        name.to_owned(),
+                        args.iter()
+                            .rev()
+                            .fold(Type::ttype(type_name), |acm, ty| t_fun(ty.clone(), acm)),
+                    )
+                }
+            }
         }
         Ok(())
     }
@@ -309,14 +327,11 @@ impl TypeInfer {
                         ty
                     }
                 },
-                Type::TInt => Type::TInt,
-                Type::TBool => Type::TBool,
-                Type::TString => Type::TString,
-                Type::TUnit => Type::TUnit,
                 Type::TFun(t1, t2) => t_fun(go(*t1, map, self_), go(*t2, map, self_)),
                 t @ Type::TVar(_, _, _) => t,
                 Type::TVector(ty) => Type::TVector(Box::new(go(*ty, map, self_))),
                 Type::TRef(ty) => Type::TRef(Box::new(go(*ty, map, self_))),
+                Type::TType(ty) => Type::TType(ty),
             }
         }
         go(ty, &mut HashMap::new(), self)
@@ -332,12 +347,9 @@ impl TypeInfer {
                 self.generalize(&*t2);
             }
             Type::TVector(t1) => self.generalize(&*t1),
-            Type::TInt => (),
-            Type::TBool => (),
-            Type::TString => (),
-            Type::TUnit => (),
             Type::TQVar(_) => (),
             Type::TRef(ty) => self.generalize(&ty),
+            Type::TType(_) => (),
         }
     }
 }
@@ -348,75 +360,78 @@ fn typeinfer_expr_test() {
     let mut typeinfer = TypeInfer::new();
     assert_eq!(
         typeinfer.typeinfer_expr(&parser_expr("1+1").unwrap().1),
-        Ok(Type::TInt)
+        Ok(Type::ttype("Int"))
     );
     assert_eq!(
         typeinfer.typeinfer_expr(&parser_expr("3<2").unwrap().1),
-        Ok(Type::TBool)
+        Ok(Type::ttype("Bool"))
     );
     assert_eq!(
         typeinfer.typeinfer_expr(&parser_expr("1%1").unwrap().1),
-        Ok(Type::TInt)
+        Ok(Type::ttype("Int"))
     );
     assert_eq!(
         typeinfer.typeinfer_expr(&parser_expr("if (3>2) 1 else 2").unwrap().1),
-        Ok(Type::TInt)
+        Ok(Type::ttype("Int"))
     );
     assert_eq!(
         typeinfer.typeinfer_expr(&parser_expr("if (3>2) 1 else 3>2").unwrap().1),
-        Err(TypeInferError::UnifyError(Type::TInt, Type::TBool))
+        Err(TypeInferError::UnifyError(
+            Type::ttype("Int"),
+            Type::ttype("Bool")
+        ))
     );
     assert_eq!(
         typeinfer.typeinfer_expr(&Expr::EString("hoge".to_owned())),
-        Ok(Type::TString)
+        Ok(Type::ttype("String"))
     );
     assert_eq!(
         typeinfer.typeinfer_expr(&parser_expr("()").unwrap().1),
-        Ok(Type::TUnit)
+        Ok(Type::ttype("()"))
     );
     assert_eq!(
         typeinfer
             .typeinfer_expr(&parser_expr(r#"puts("Hello, world!")"#).unwrap().1)
             .map(|ty| ty.simplify()),
-        Ok(Type::TUnit)
+        Ok(Type::ttype("()"))
     );
     assert_eq!(
         typeinfer.typeinfer_expr(&parser_expr("{let x = 1; x == 1;}").unwrap().1),
-        Ok(Type::TBool)
+        Ok(Type::ttype("Bool"))
     );
     assert_eq!(
         typeinfer.typeinfer_expr(&parser_expr("{let x = 1;}").unwrap().1),
-        Ok(Type::TUnit)
+        Ok(Type::ttype("()"))
     );
     assert_eq!(
         typeinfer
             .typeinfer_expr(&parser_expr("[1, 2, 3]").unwrap().1)
             .map(|t| t.simplify()),
-        Ok(Type::TVector(Box::new(Type::TInt)))
+        Ok(Type::TVector(Box::new(Type::ttype("Int"))))
     );
     assert_eq!(
         typeinfer
             .typeinfer_expr(&parser_expr("-1").unwrap().1)
             .map(|t| t.simplify()),
-        Ok(Type::TInt)
+        Ok(Type::ttype("Int"))
     );
     assert_eq!(
         typeinfer
             .typeinfer_expr(&parser_expr("&3").unwrap().1)
             .map(|t| t.simplify()),
-        Ok(Type::TRef(Box::new(Type::TInt)))
+        Ok(Type::TRef(Box::new(Type::ttype("Int"))))
     );
     assert_eq!(
         typeinfer
             .typeinfer_expr(&parser_expr("*(&1)").unwrap().1)
             .map(|t| t.simplify()),
-        Ok(Type::TInt)
+        Ok(Type::ttype("Int"))
     );
     assert_eq!(
         typeinfer
             .typeinfer_expr(&parser_expr("&3:=4").unwrap().1)
             .map(|t| t.simplify()),
-        Ok(Type::TUnit)
+        Ok(Type::ttype("()"))
     );
 }
 
@@ -435,8 +450,8 @@ fn typeinfer_statements_test_helper(str: &str, name: &str, ty: Result<Type, Type
 
 #[test]
 fn typeinfer_statements_test() {
-    typeinfer_statements_test_helper("let a = 1;", "a", Ok(Type::TInt));
-    typeinfer_statements_test_helper("let a = 1; let b = a + 1;", "b", Ok(Type::TInt));
+    typeinfer_statements_test_helper("let a = 1;", "a", Ok(Type::ttype("Int")));
+    typeinfer_statements_test_helper("let a = 1; let b = a + 1;", "b", Ok(Type::ttype("Int")));
 }
 
 #[test]
@@ -444,7 +459,7 @@ fn typeinfer_if_test() {
     typeinfer_statements_test_helper(
         "let a = 1; let b = if (a == 1) 3 > 2 else 4 < 2;",
         "b",
-        Ok(Type::TBool),
+        Ok(Type::ttype("Bool")),
     );
 }
 
@@ -453,14 +468,17 @@ fn typeinfer_fun_test() {
     typeinfer_statements_test_helper(
         "let add(a, b) = a + b;",
         "add",
-        Ok(t_fun(Type::TInt, t_fun(Type::TInt, Type::TInt))),
+        Ok(t_fun(
+            Type::ttype("Int"),
+            t_fun(Type::ttype("Int"), Type::ttype("Int")),
+        )),
     );
     typeinfer_statements_test_helper(
         "let add(a, b) = a + b; let a = add(2, 3);",
         "a",
-        Ok(Type::TInt),
+        Ok(Type::ttype("Int")),
     );
-    typeinfer_statements_test_helper("let id(x) = x; let a = id(2);", "a", Ok(Type::TInt));
+    typeinfer_statements_test_helper("let id(x) = x; let a = id(2);", "a", Ok(Type::ttype("Int")));
     typeinfer_statements_test_helper(
         "let id(x) = x; let a = id(2);",
         "id",
@@ -502,10 +520,7 @@ fn unify(t1: &Type, t2: &Type) -> Result<(), TypeInferError> {
 
 fn occur(n: u64, t: &Type) -> bool {
     match (n, t.simplify()) {
-        (_, Type::TInt) => false,
-        (_, Type::TString) => false,
-        (_, Type::TBool) => false,
-        (_, Type::TUnit) => false,
+        (_, Type::TType(_)) => false,
         (n, Type::TVar(m, level, _)) if n == m => true,
         (n, Type::TVar(_, level1, t1)) => false,
         (n, Type::TFun(t1, t2)) => occur(n, &t1) || occur(n, &t2),
