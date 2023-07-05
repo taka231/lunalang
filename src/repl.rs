@@ -73,7 +73,10 @@ pub fn repl() {
                     continue;
                 }
                 let result = repl.eval.eval_expr(ast);
-                println!("{:?}", result);
+                match result {
+                    Ok(e) => println!("{:?}", e),
+                    Err(err) => println!("{}", err),
+                }
             }
             Ok((_, StatementOrExpr::Statement(stmt))) => {
                 match repl.typeinfer.typeinfer_statement(&stmt) {
