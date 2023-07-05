@@ -415,7 +415,7 @@ pub fn statement_typedef(input: &str) -> IResult<&str, Statement> {
         let (input, name) = identifier_start_with_capital(input)?;
         let (input, args) = opt(|input| {
             let (input, _) = symbol("(")(input)?;
-            let (input, args) = separated_list0(symbol(","), parser_type)(input)?;
+            let (input, args) = separated_list0(symbol(","), parser_type_init)(input)?;
             let (input, _) = symbol(")")(input)?;
             Ok((input, args))
         })(input)?;
@@ -455,9 +455,110 @@ fn statement_typedef_test() {
     )
 }
 
+pub fn parser_type_init(input: &str) -> IResult<&str, Type> {
+    parser_fun_type(input)
+}
+
+#[test]
+fn parser_type_test() {
+    assert_eq!(
+        parser_type_init("Int"),
+        Ok(("", Type::TType("Int".to_owned())))
+    );
+    assert_eq!(
+        parser_type_init("Int -> Int"),
+        Ok((
+            "",
+            Type::TFun(
+                Box::new(Type::TType("Int".to_owned())),
+                Box::new(Type::TType("Int".to_owned())),
+            )
+        ))
+    );
+    assert_eq!(
+        parser_type_init("Int -> Bool -> Int"),
+        Ok((
+            "",
+            Type::TFun(
+                Box::new(Type::TType("Int".to_owned())),
+                Box::new(Type::TFun(
+                    Box::new(Type::TType("Bool".to_owned())),
+                    Box::new(Type::TType("Int".to_owned()))
+                )),
+            )
+        ))
+    );
+    assert_eq!(
+        parser_type_init("()"),
+        Ok(("", Type::TType("()".to_owned())))
+    );
+    assert_eq!(
+        parser_type_init("Ref[Int]"),
+        Ok(("", Type::TRef(Box::new(Type::TType("Int".to_owned())))))
+    );
+    assert_eq!(
+        parser_type_init("Vector[Bool]"),
+        Ok(("", Type::TVector(Box::new(Type::TType("Bool".to_owned())))))
+    );
+    assert_eq!(
+        parser_type_init("(Int -> Int)"),
+        Ok((
+            "",
+            Type::TFun(
+                Box::new(Type::TType("Int".to_owned())),
+                Box::new(Type::TType("Int".to_owned())),
+            )
+        ))
+    );
+}
+
+pub fn parser_fun_type(input: &str) -> IResult<&str, Type> {
+    let (input, t1) = parser_type(input)?;
+    let (input, t2) = opt(|input| {
+        let (input, _) = symbol("->")(input)?;
+        let (input, t2) = parser_fun_type(input)?;
+        Ok((input, t2))
+    })(input)?;
+    match t2 {
+        Some(t2) => Ok((input, Type::TFun(Box::new(t1), Box::new(t2)))),
+        None => Ok((input, t1)),
+    }
+}
+
 pub fn parser_type(input: &str) -> IResult<&str, Type> {
+    alt((
+        delimited(symbol("("), parser_type_init, symbol(")")),
+        parser_ref_type,
+        parser_vector_type,
+        parser_simple_type,
+        parser_unit_type,
+    ))(input)
+}
+
+pub fn parser_simple_type(input: &str) -> IResult<&str, Type> {
     let (input, id) = identifier_start_with_capital(input)?;
     Ok((input, Type::TType(id)))
+}
+
+pub fn parser_unit_type(input: &str) -> IResult<&str, Type> {
+    let (input, _) = symbol("()")(input)?;
+    Ok((input, Type::TType("()".to_owned())))
+}
+
+pub fn parser_ref_type(input: &str) -> IResult<&str, Type> {
+    let (input, _) = symbol("Ref")(input)?;
+    let (input, _) = symbol("[")(input)?;
+    let (input, ty) = parser_type_init(input)?;
+    let (input, _) = symbol("]")(input)?;
+    Ok((input, Type::TRef(Box::new(ty))))
+}
+
+pub fn parser_vector_type(input: &str) -> IResult<&str, Type> {
+    let (input, _) = symbol("Vector")(input)?;
+    let (input, _) = symbol("[")(input)?;
+    let (input, ty) = parser_type_init(input)?;
+    let (input, _) = symbol("]")(input)?;
+    Ok((input, Type::TVector(Box::new(ty))))
 }
 
 pub fn fun_def(input: &str) -> IResult<&str, Statement> {
