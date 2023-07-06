@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use crate::ast::{Expr, Statement, StatementOrExpr, Statements};
+use crate::ast::{ConstructorDef, Expr, Statement, StatementOrExpr, Statements};
 use crate::error::EvalError;
 #[derive(Eq, PartialEq, Debug, Clone)]
 pub enum Value {
@@ -13,6 +13,7 @@ pub enum Value {
     VUnit,
     VBuiltin(BuiltinFn, Vec<Value>, usize),
     VVector(Vec<Value>),
+    VConstructor(String, Vec<Value>),
     VRef(Rc<RefCell<Value>>),
 }
 
@@ -260,6 +261,15 @@ impl Eval {
                 let val = self.eval_expr(e)?;
                 Ok(self.env.borrow_mut().insert(name, val))
             }
+            Statement::TypeDef(_, constructor_def_vec) => {
+                for ConstructorDef { name, args } in constructor_def_vec {
+                    self.env.borrow_mut().insert(
+                        name.to_owned(),
+                        Value::VConstructor(name.to_owned(), vec![]),
+                    )
+                }
+                Ok(())
+            }
         }
     }
     pub fn eval_statements(&self, asts: Statements) -> Result<(), EvalError> {
@@ -291,6 +301,11 @@ impl Eval {
                 } else {
                     Ok(Value::VBuiltin(fun, args_mut, args_num))
                 }
+            }
+            Value::VConstructor(name, args) => {
+                let mut mut_args = args;
+                mut_args.push(v2);
+                Ok(Value::VConstructor(name, mut_args))
             }
             _ => Err(EvalError::InternalTypeError),
         }
@@ -396,5 +411,13 @@ fn test_ref() {
 };
 let main = sum([1..=100]);",
         Ok(Value::VInt(5050)),
+    )
+}
+
+#[test]
+fn test_enum() {
+    test_eval_statements_helper(
+        "enum Hoge{Foo(Int)}; let main = Foo(3);",
+        Ok(Value::VConstructor("Foo".to_owned(), vec![Value::VInt(3)])),
     )
 }
