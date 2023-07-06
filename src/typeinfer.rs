@@ -486,6 +486,15 @@ fn typeinfer_fun_test() {
     );
 }
 
+#[test]
+fn typeinfer_enum_test() {
+    typeinfer_statements_test_helper(
+        "enum Hoge {Foo(Int)}; let a = Foo;",
+        "a",
+        Ok(t_fun(Type::ttype("Int"), Type::ttype("Hoge"))),
+    )
+}
+
 fn unify(t1: &Type, t2: &Type) -> Result<(), TypeInferError> {
     match (t1.simplify(), t2.simplify()) {
         (t1, t2) if t1 == t2 => Ok(()),

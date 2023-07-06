@@ -413,3 +413,11 @@ let main = sum([1..=100]);",
         Ok(Value::VInt(5050)),
     )
 }
+
+#[test]
+fn test_enum() {
+    test_eval_statements_helper(
+        "enum Hoge{Foo(Int)}; let main = Foo(3);",
+        Ok(Value::VConstructor("Foo".to_owned(), vec![Value::VInt(3)])),
+    )
+}
