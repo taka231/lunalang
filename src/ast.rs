@@ -13,6 +13,14 @@ pub enum Expr {
     EUnit,
     EBlockExpr(Vec<StatementOrExpr>),
     EVector(Vec<Expr>),
+    EMatch(Box<Expr>, Vec<(Pattern, Expr)>),
+}
+
+#[derive(PartialEq, Eq, Debug, Clone)]
+pub enum Pattern {
+    PValue(Expr),
+    PConstructor(String, Vec<Pattern>),
+    PVar(String),
 }
 
 pub fn e_int(n: i64) -> Expr {
