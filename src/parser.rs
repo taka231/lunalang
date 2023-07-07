@@ -281,6 +281,57 @@ fn test_fun_app() {
     )
 }
 
+pub fn parser_match_expr(input: &str) -> IResult<&str, Expr> {
+    let (input, e1) = expr_op_0n(input)?;
+    let (input, match_arms) = opt(|input| {
+        let (input, _) = keyword("match")(input)?;
+        let (input, _) = symbol("{")(input)?;
+        let (input, match_arms) = separated_list0(symbol(","), |input| {
+            let (input, pattern) = parser_pattern(input)?;
+            let (input, _) = symbol("=>")(input)?;
+            let (input, expr) = parser_expr(input)?;
+            Ok((input, (pattern, expr)))
+        })(input)?;
+        let (input, _) = symbol("}")(input)?;
+        Ok((input, match_arms))
+    })(input)?;
+    match match_arms {
+        Some(match_arms) => Ok((input, Expr::EMatch(Box::new(e1), match_arms))),
+        None => Ok((input, e1)),
+    }
+}
+
+#[test]
+fn test_match_expr() {
+    assert_eq!(
+        parser_expr(
+            "hoge match {
+            Some(n) => n,
+            None => 0
+        }"
+        ),
+        Ok((
+            "",
+            Expr::EMatch(
+                Box::new(Expr::EVar("hoge".to_owned())),
+                vec![
+                    (
+                        Pattern::PConstructor(
+                            "Some".to_owned(),
+                            vec![Pattern::PVar("n".to_owned())]
+                        ),
+                        Expr::EVar("n".to_owned())
+                    ),
+                    (
+                        Pattern::PConstructor("None".to_owned(), vec![]),
+                        Expr::EInt(0)
+                    )
+                ]
+            )
+        ))
+    )
+}
+
 pub fn expr_if(input: &str) -> IResult<&str, Expr> {
     let (input, _) = symbol("if")(input)?;
     let (input, cond) = delimited(symbol("("), parser_expr, symbol(")"))(input)?;
@@ -595,8 +646,12 @@ fn identifier(input: &str) -> IResult<&str, String> {
     let (input, first_char) = one_of("abcdefghijklmnopqrstuvwxyz_")(input)?;
     let (input, mut chars) = many0(satisfy(|c| is_alphanumeric(c as u8) || c == '_'))(input)?;
     let (input, _) = multispace0(input)?;
-    let is_keyword =
-        |x: &&str| vec!["if", "else", "let", "fn", "for", "in", "do", "enum"].contains(x);
+    let is_keyword = |x: &&str| {
+        vec![
+            "if", "else", "let", "fn", "for", "in", "do", "enum", "match",
+        ]
+        .contains(x)
+    };
     chars.insert(0, first_char);
     let ident: String = chars.iter().collect();
     if is_keyword(&(&ident as &str)) {
@@ -688,7 +743,7 @@ fn parser_statements_test() {
 }
 
 pub fn parser_expr<'a>(input: &'a str) -> IResult<&'a str, Expr> {
-    let (input, expr) = expr_op_0n(input)?;
+    let (input, expr) = parser_match_expr(input)?;
     Ok((input, expr))
 }
 
