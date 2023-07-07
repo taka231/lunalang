@@ -1,7 +1,7 @@
 use crate::{
     ast::{
         self, e_bin_op, e_fun, e_fun_app, e_if, e_int, e_string, e_var, ConstructorDef, Expr,
-        Statement, StatementOrExpr, Statements,
+        Pattern, Statement, StatementOrExpr, Statements,
     },
     typeinfer::Type,
 };
@@ -75,11 +75,7 @@ pub fn term(input: &str) -> IResult<&str, Expr> {
 pub fn simple_term(input: &str) -> IResult<&str, Expr> {
     alt((
         expr_int,
-        |input| {
-            let (input, _) = symbol("(")(input)?;
-            let (input, _) = symbol(")")(input)?;
-            Ok((input, Expr::EUnit))
-        },
+        parser_unit,
         block_term,
         enum_vec_expr,
         expr_vector,
@@ -90,6 +86,12 @@ pub fn simple_term(input: &str) -> IResult<&str, Expr> {
         },
         expr_string,
     ))(input)
+}
+
+pub fn parser_unit(input: &str) -> IResult<&str, Expr> {
+    let (input, _) = symbol("(")(input)?;
+    let (input, _) = symbol(")")(input)?;
+    Ok((input, Expr::EUnit))
 }
 
 pub fn block_term(input: &str) -> IResult<&str, Expr> {
