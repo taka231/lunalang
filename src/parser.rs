@@ -936,3 +936,73 @@ pub fn enum_vec_expr(input: &str) -> IResult<&str, Expr> {
         _ => panic!("internal error"),
     }
 }
+
+pub fn parser_pattern(input: &str) -> IResult<&str, Pattern> {
+    alt((
+        parser_constructor_pattern,
+        parser_variable_pattern,
+        parser_value_pattern,
+    ))(input)
+}
+
+#[test]
+fn test_parser_pattern() {
+    assert_eq!(
+        parser_pattern("3"),
+        Ok(("", Pattern::PValue(Expr::EInt(3))))
+    );
+    assert_eq!(parser_pattern("()"), Ok(("", Pattern::PValue(Expr::EUnit))));
+    assert_eq!(parser_pattern("n"), Ok(("", Pattern::PVar("n".to_owned()))));
+    assert_eq!(
+        parser_pattern("Foo(3)"),
+        Ok((
+            "",
+            Pattern::PConstructor("Foo".to_owned(), vec![Pattern::PValue(Expr::EInt(3))])
+        ))
+    );
+    assert_eq!(
+        parser_pattern("Foo(x)"),
+        Ok((
+            "",
+            Pattern::PConstructor("Foo".to_owned(), vec![Pattern::PVar("x".to_owned())])
+        ))
+    );
+    assert_eq!(
+        parser_pattern("Foo(3, x)"),
+        Ok((
+            "",
+            Pattern::PConstructor(
+                "Foo".to_owned(),
+                vec![
+                    Pattern::PValue(Expr::EInt(3)),
+                    Pattern::PVar("x".to_owned())
+                ]
+            )
+        ))
+    );
+}
+
+pub fn parser_variable_pattern(input: &str) -> IResult<&str, Pattern> {
+    let (input, var) = identifier(input)?;
+    Ok((input, Pattern::PVar(var)))
+}
+
+pub fn parser_value_pattern(input: &str) -> IResult<&str, Pattern> {
+    let (input, expr) = alt((expr_int, parser_unit))(input)?;
+    Ok((input, Pattern::PValue(expr)))
+}
+
+pub fn parser_constructor_pattern(input: &str) -> IResult<&str, Pattern> {
+    let (input, name) = identifier_start_with_capital(input)?;
+    let (input, args) = opt(|input| {
+        delimited(
+            symbol("("),
+            separated_list0(symbol(","), parser_pattern),
+            symbol(")"),
+        )(input)
+    })(input)?;
+    match args {
+        Some(args) => Ok((input, Pattern::PConstructor(name, args))),
+        None => Ok((input, Pattern::PConstructor(name, vec![]))),
+    }
+}
