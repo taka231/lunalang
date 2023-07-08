@@ -9,6 +9,7 @@ pub enum TypeInferError {
     OccurError(u64, Type),
     UnimplementedOperatorError(String),
     UndefinedVariable(String),
+    InvalidArgumentPatternError(usize, usize),
 }
 
 impl Display for TypeInferError {
@@ -21,6 +22,13 @@ impl Display for TypeInferError {
             }
             Self::UndefinedVariable(var) => {
                 write!(f, "type error: {} is an undefined variable", var)
+            }
+            Self::InvalidArgumentPatternError(expected, fact) => {
+                write!(
+                    f,
+                    "type error: {} arguments were expected but got {}.",
+                    expected, fact
+                )
             }
         }
     }
