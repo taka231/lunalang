@@ -41,6 +41,7 @@ pub enum EvalError {
     InternalTypeError,
     UnimplementedOperatorError(String),
     UndefinedVariable(String),
+    NotMatchAnyPattern,
 }
 
 impl Display for EvalError {
@@ -52,6 +53,9 @@ impl Display for EvalError {
             }
             Self::UndefinedVariable(var) => {
                 write!(f, "eval error: {} is an undefined variable", var)
+            }
+            Self::NotMatchAnyPattern => {
+                write!(f, "does not match any pattern")
             }
         }
     }
