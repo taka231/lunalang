@@ -1,4 +1,4 @@
-use crate::ast::{ConstructorDef, Expr, Statement, StatementOrExpr, Statements};
+use crate::ast::{ConstructorDef, Expr, Pattern, Statement, StatementOrExpr, Statements};
 use crate::error::TypeInferError;
 use std::collections::HashMap;
 use std::fmt::write;
@@ -41,6 +41,21 @@ impl Type {
 
     fn unwrap_all(t: Rc<RefCell<Option<Type>>>) -> Type {
         (*t).borrow().as_ref().unwrap().clone()
+    }
+
+    fn separate_to_args_and_resulttype(&self) -> (Vec<Type>, Type) {
+        let mut ty = self.simplify();
+        let mut args = vec![];
+        loop {
+            match ty {
+                Self::TFun(ty1, ty2) => {
+                    args.push(*ty1);
+                    ty = *ty2
+                }
+                _ => break,
+            }
+        }
+        (args, ty)
     }
 }
 
@@ -277,6 +292,24 @@ impl TypeInfer {
                     op => Err(TypeInferError::UnimplementedOperatorError(op.to_owned())),
                 }
             }
+            Expr::EMatch(expr, match_arms) => {
+                let ty = self.typeinfer_expr(expr)?;
+                if match_arms.len() == 0 {
+                    return Ok(ty);
+                }
+                let result_ty = self.newTVar();
+                for (pattern, expr) in match_arms {
+                    let mut typeinfer = TypeInfer::from(
+                        TypeEnv::new_enclosed_env(Rc::clone(&self.env)),
+                        self.unassigned_num,
+                        self.level,
+                    );
+                    typeinfer.typeinfer_pattern(&pattern, &ty)?;
+                    unify(&result_ty, &typeinfer.typeinfer_expr(expr)?)?;
+                    self.unassigned_num = typeinfer.unassigned_num
+                }
+                Ok(result_ty)
+            }
         }
     }
     fn typeinfer_expr_levelup(&mut self, ast: &Expr) -> Result<Type, TypeInferError> {
@@ -284,6 +317,32 @@ impl TypeInfer {
         let ty = self.typeinfer_expr(ast)?;
         self.level -= 1;
         Ok(ty)
+    }
+
+    fn typeinfer_pattern(&mut self, pattern: &Pattern, ty: &Type) -> Result<(), TypeInferError> {
+        match pattern {
+            Pattern::PValue(value) => unify(&self.typeinfer_expr(value)?, ty)?,
+            Pattern::PConstructor(name, patterns) => {
+                let constructor_ty = self.env.borrow().get(&name)?;
+                let (args, result) = constructor_ty.separate_to_args_and_resulttype();
+                if args.len() != patterns.len() {
+                    return Err(TypeInferError::InvalidArgumentPatternError(
+                        args.len(),
+                        patterns.len(),
+                    ));
+                }
+                for i in 0..args.len() {
+                    self.typeinfer_pattern(&patterns[i], &args[i])?;
+                }
+                unify(&result, ty)?;
+            }
+            Pattern::PVar(var_name) => {
+                let new_type = self.newTVar();
+                unify(&new_type, ty)?;
+                self.env.borrow_mut().insert(var_name.clone(), new_type)
+            }
+        };
+        Ok(())
     }
 
     pub fn typeinfer_statement(&mut self, ast: &Statement) -> Result<(), TypeInferError> {

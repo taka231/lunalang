@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use crate::ast::{ConstructorDef, Expr, Statement, StatementOrExpr, Statements};
+use crate::ast::{ConstructorDef, Expr, Pattern, Statement, StatementOrExpr, Statements};
 use crate::error::EvalError;
 #[derive(Eq, PartialEq, Debug, Clone)]
 pub enum Value {
@@ -253,6 +253,44 @@ impl Eval {
                 }
                 _ => Err(EvalError::UnimplementedOperatorError(op)),
             },
+            Expr::EMatch(expr, match_arms) => {
+                let expr = self.eval_expr(*expr)?;
+                for (pattern, expr_arm) in match_arms {
+                    let eval = Eval::from(Environment::new_enclosed_env(Rc::clone(&self.env)));
+                    if eval.expr_match_pattern(&expr, &pattern)? == true {
+                        return eval.eval_expr(expr_arm);
+                    }
+                }
+                Err(EvalError::NotMatchAnyPattern)
+            }
+        }
+    }
+    fn expr_match_pattern(&self, expr: &Value, pattern: &Pattern) -> Result<bool, EvalError> {
+        match pattern {
+            Pattern::PValue(value) => {
+                let value = self.eval_expr(value.clone())?;
+                Ok(value == *expr)
+            }
+            Pattern::PConstructor(name, patterns) => {
+                if let Value::VConstructor(constructor_name, args) = expr {
+                    if constructor_name != name {
+                        return Ok(false);
+                    } else if patterns.len() != args.len() {
+                        return Err(EvalError::InternalTypeError);
+                    }
+                    let mut result = true;
+                    for i in 0..patterns.len() {
+                        result = result && self.expr_match_pattern(&args[i], &patterns[i])?;
+                    }
+                    Ok(result)
+                } else {
+                    Ok(false)
+                }
+            }
+            Pattern::PVar(var_name) => {
+                self.env.borrow_mut().insert(var_name.clone(), expr.clone());
+                Ok(true)
+            }
         }
     }
     pub fn eval_statement(&self, ast: Statement) -> Result<(), EvalError> {
@@ -419,5 +457,22 @@ fn test_enum() {
     test_eval_statements_helper(
         "enum Hoge{Foo(Int)}; let main = Foo(3);",
         Ok(Value::VConstructor("Foo".to_owned(), vec![Value::VInt(3)])),
+    )
+}
+
+#[test]
+fn test_match_expr() {
+    test_eval_statements_helper(
+        "
+enum OptionInt {
+    Some(Int),
+    None
+};
+let main = Some(3) match {
+    Some(x) => x,
+    None => 0
+};
+        ",
+        Ok(Value::VInt(3)),
     )
 }

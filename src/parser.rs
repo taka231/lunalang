@@ -1,7 +1,7 @@
 use crate::{
     ast::{
         self, e_bin_op, e_fun, e_fun_app, e_if, e_int, e_string, e_var, ConstructorDef, Expr,
-        Statement, StatementOrExpr, Statements,
+        Pattern, Statement, StatementOrExpr, Statements,
     },
     typeinfer::Type,
 };
@@ -75,11 +75,7 @@ pub fn term(input: &str) -> IResult<&str, Expr> {
 pub fn simple_term(input: &str) -> IResult<&str, Expr> {
     alt((
         expr_int,
-        |input| {
-            let (input, _) = symbol("(")(input)?;
-            let (input, _) = symbol(")")(input)?;
-            Ok((input, Expr::EUnit))
-        },
+        parser_unit,
         block_term,
         enum_vec_expr,
         expr_vector,
@@ -90,6 +86,12 @@ pub fn simple_term(input: &str) -> IResult<&str, Expr> {
         },
         expr_string,
     ))(input)
+}
+
+pub fn parser_unit(input: &str) -> IResult<&str, Expr> {
+    let (input, _) = symbol("(")(input)?;
+    let (input, _) = symbol(")")(input)?;
+    Ok((input, Expr::EUnit))
 }
 
 pub fn block_term(input: &str) -> IResult<&str, Expr> {
@@ -276,6 +278,57 @@ fn test_fun_app() {
     assert_eq!(
         parser_expr("add(2, 3)").unwrap().1,
         e_fun_app(e_fun_app(e_var("add"), e_int(2)), e_int(3)),
+    )
+}
+
+pub fn parser_match_expr(input: &str) -> IResult<&str, Expr> {
+    let (input, e1) = expr_op_0n(input)?;
+    let (input, match_arms) = opt(|input| {
+        let (input, _) = keyword("match")(input)?;
+        let (input, _) = symbol("{")(input)?;
+        let (input, match_arms) = separated_list0(symbol(","), |input| {
+            let (input, pattern) = parser_pattern(input)?;
+            let (input, _) = symbol("=>")(input)?;
+            let (input, expr) = parser_expr(input)?;
+            Ok((input, (pattern, expr)))
+        })(input)?;
+        let (input, _) = symbol("}")(input)?;
+        Ok((input, match_arms))
+    })(input)?;
+    match match_arms {
+        Some(match_arms) => Ok((input, Expr::EMatch(Box::new(e1), match_arms))),
+        None => Ok((input, e1)),
+    }
+}
+
+#[test]
+fn test_match_expr() {
+    assert_eq!(
+        parser_expr(
+            "hoge match {
+            Some(n) => n,
+            None => 0
+        }"
+        ),
+        Ok((
+            "",
+            Expr::EMatch(
+                Box::new(Expr::EVar("hoge".to_owned())),
+                vec![
+                    (
+                        Pattern::PConstructor(
+                            "Some".to_owned(),
+                            vec![Pattern::PVar("n".to_owned())]
+                        ),
+                        Expr::EVar("n".to_owned())
+                    ),
+                    (
+                        Pattern::PConstructor("None".to_owned(), vec![]),
+                        Expr::EInt(0)
+                    )
+                ]
+            )
+        ))
     )
 }
 
@@ -593,8 +646,12 @@ fn identifier(input: &str) -> IResult<&str, String> {
     let (input, first_char) = one_of("abcdefghijklmnopqrstuvwxyz_")(input)?;
     let (input, mut chars) = many0(satisfy(|c| is_alphanumeric(c as u8) || c == '_'))(input)?;
     let (input, _) = multispace0(input)?;
-    let is_keyword =
-        |x: &&str| vec!["if", "else", "let", "fn", "for", "in", "do", "enum"].contains(x);
+    let is_keyword = |x: &&str| {
+        vec![
+            "if", "else", "let", "fn", "for", "in", "do", "enum", "match",
+        ]
+        .contains(x)
+    };
     chars.insert(0, first_char);
     let ident: String = chars.iter().collect();
     if is_keyword(&(&ident as &str)) {
@@ -686,7 +743,7 @@ fn parser_statements_test() {
 }
 
 pub fn parser_expr<'a>(input: &'a str) -> IResult<&'a str, Expr> {
-    let (input, expr) = expr_op_0n(input)?;
+    let (input, expr) = parser_match_expr(input)?;
     Ok((input, expr))
 }
 
@@ -932,5 +989,75 @@ pub fn enum_vec_expr(input: &str) -> IResult<&str, Expr> {
         )),
         ".." => Ok((input, e_fun_app(e_fun_app(e_var("enum_from_to"), e1), e2))),
         _ => panic!("internal error"),
+    }
+}
+
+pub fn parser_pattern(input: &str) -> IResult<&str, Pattern> {
+    alt((
+        parser_constructor_pattern,
+        parser_variable_pattern,
+        parser_value_pattern,
+    ))(input)
+}
+
+#[test]
+fn test_parser_pattern() {
+    assert_eq!(
+        parser_pattern("3"),
+        Ok(("", Pattern::PValue(Expr::EInt(3))))
+    );
+    assert_eq!(parser_pattern("()"), Ok(("", Pattern::PValue(Expr::EUnit))));
+    assert_eq!(parser_pattern("n"), Ok(("", Pattern::PVar("n".to_owned()))));
+    assert_eq!(
+        parser_pattern("Foo(3)"),
+        Ok((
+            "",
+            Pattern::PConstructor("Foo".to_owned(), vec![Pattern::PValue(Expr::EInt(3))])
+        ))
+    );
+    assert_eq!(
+        parser_pattern("Foo(x)"),
+        Ok((
+            "",
+            Pattern::PConstructor("Foo".to_owned(), vec![Pattern::PVar("x".to_owned())])
+        ))
+    );
+    assert_eq!(
+        parser_pattern("Foo(3, x)"),
+        Ok((
+            "",
+            Pattern::PConstructor(
+                "Foo".to_owned(),
+                vec![
+                    Pattern::PValue(Expr::EInt(3)),
+                    Pattern::PVar("x".to_owned())
+                ]
+            )
+        ))
+    );
+}
+
+pub fn parser_variable_pattern(input: &str) -> IResult<&str, Pattern> {
+    let (input, var) = identifier(input)?;
+    Ok((input, Pattern::PVar(var)))
+}
+
+pub fn parser_value_pattern(input: &str) -> IResult<&str, Pattern> {
+    let (input, expr) = alt((expr_int, parser_unit))(input)?;
+    Ok((input, Pattern::PValue(expr)))
+}
+
+pub fn parser_constructor_pattern(input: &str) -> IResult<&str, Pattern> {
+    let (input, name) = identifier_start_with_capital(input)?;
+    let (input, args) = opt(|input| {
+        delimited(
+            symbol("("),
+            separated_list0(symbol(","), parser_pattern),
+            symbol(")"),
+        )(input)
+    })(input)?;
+    match args {
+        Some(args) => Ok((input, Pattern::PConstructor(name, args))),
+        None => Ok((input, Pattern::PConstructor(name, vec![]))),
     }
 }
