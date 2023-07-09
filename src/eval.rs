@@ -459,3 +459,20 @@ fn test_enum() {
         Ok(Value::VConstructor("Foo".to_owned(), vec![Value::VInt(3)])),
     )
 }
+
+#[test]
+fn test_match_expr() {
+    test_eval_statements_helper(
+        "
+enum OptionInt {
+    Some(Int),
+    None
+};
+let main = Some(3) match {
+    Some(x) => x,
+    None => 0
+};
+        ",
+        Ok(Value::VInt(3)),
+    )
+}
