@@ -12,11 +12,25 @@ pub enum Type {
     TQVar(u64),
     TVector(Box<Type>),
     TRef(Box<Type>),
+    TVariant(Vec<(String, Vec<Type>)>),
 }
 
 impl Type {
     fn ttype(ty: impl Into<String>) -> Type {
         Type::TType(ty.into())
+    }
+
+    fn variant_to_type(&self, name: &str) -> Result<Vec<Type>, TypeInferError> {
+        match self.simplify() {
+            Type::TVariant(variants) => variants
+                .iter()
+                .find(|(n, _)| n == name)
+                .map(|(_, tys)| tys.clone())
+                .ok_or_else(|| {
+                    TypeInferError::VariantDoesNotHaveConstructor(self.clone(), name.to_owned())
+                }),
+            _ => Err(TypeInferError::ExpectedVariatButGot(self.clone())),
+        }
     }
 }
 
@@ -36,6 +50,17 @@ impl Type {
             Type::TVector(ty) => Type::TVector(Box::new(ty.simplify())),
             Type::TRef(ty) => Type::TRef(Box::new(ty.simplify())),
             Type::TType(ty) => Type::TType(ty.to_owned()),
+            Type::TVariant(variants) => Type::TVariant(
+                variants
+                    .iter()
+                    .map(|(name, tys)| {
+                        (
+                            name.to_owned(),
+                            tys.iter().map(|ty| ty.simplify()).collect(),
+                        )
+                    })
+                    .collect(),
+            ),
         }
     }
 
@@ -152,6 +177,24 @@ impl Display for Type {
             Type::TVector(ty) => write!(f, "Vector[{}]", ty),
             Type::TRef(ty) => write!(f, "Ref[{}]", ty),
             Type::TType(ty) => write!(f, "{}", ty),
+            Type::TVariant(variants) => write!(
+                f,
+                "<{}>",
+                variants
+                    .iter()
+                    .map(|(name, tys)| {
+                        format!(
+                            "{}({})",
+                            name,
+                            tys.iter()
+                                .map(|ty| ty.to_string())
+                                .collect::<Vec<String>>()
+                                .join(", ")
+                        )
+                    })
+                    .collect::<Vec<String>>()
+                    .join(" | ")
+            ),
         }
     }
 }
@@ -323,8 +366,7 @@ impl TypeInfer {
         match pattern {
             Pattern::PValue(value) => unify(&self.typeinfer_expr(value)?, ty)?,
             Pattern::PConstructor(name, patterns) => {
-                let constructor_ty = self.env.borrow().get(&name)?;
-                let (args, result) = constructor_ty.separate_to_args_and_resulttype();
+                let args = ty.variant_to_type(name)?;
                 if args.len() != patterns.len() {
                     return Err(TypeInferError::InvalidArgumentPatternError(
                         args.len(),
@@ -334,7 +376,6 @@ impl TypeInfer {
                 for i in 0..args.len() {
                     self.typeinfer_pattern(&patterns[i], &args[i])?;
                 }
-                unify(&result, ty)?;
             }
             Pattern::PVar(var_name) => {
                 let new_type = self.newTVar();
@@ -355,12 +396,18 @@ impl TypeInfer {
                 self.generalize(&ty);
             }
             Statement::TypeDef(type_name, constructor_def_vec) => {
+                let variant_type = Type::TVariant(
+                    constructor_def_vec
+                        .iter()
+                        .map(|ConstructorDef { name, args }| (name.to_owned(), args.to_owned()))
+                        .collect(),
+                );
                 for ConstructorDef { name, args } in constructor_def_vec {
                     self.env.borrow_mut().insert(
                         name.to_owned(),
                         args.iter()
                             .rev()
-                            .fold(Type::ttype(type_name), |acm, ty| t_fun(ty.clone(), acm)),
+                            .fold(variant_type.clone(), |acm, ty| t_fun(ty.clone(), acm)),
                     )
                 }
             }
@@ -391,6 +438,19 @@ impl TypeInfer {
                 Type::TVector(ty) => Type::TVector(Box::new(go(*ty, map, self_))),
                 Type::TRef(ty) => Type::TRef(Box::new(go(*ty, map, self_))),
                 Type::TType(ty) => Type::TType(ty),
+                Type::TVariant(variants) => Type::TVariant(
+                    variants
+                        .into_iter()
+                        .map(|(name, tys)| {
+                            (
+                                name,
+                                tys.into_iter()
+                                    .map(|ty| go(ty, map, self_))
+                                    .collect::<Vec<_>>(),
+                            )
+                        })
+                        .collect(),
+                ),
             }
         }
         go(ty, &mut HashMap::new(), self)
@@ -409,6 +469,13 @@ impl TypeInfer {
             Type::TQVar(_) => (),
             Type::TRef(ty) => self.generalize(&ty),
             Type::TType(_) => (),
+            Type::TVariant(variants) => {
+                for (_, tys) in variants {
+                    for ty in tys {
+                        self.generalize(&ty);
+                    }
+                }
+            }
         }
     }
 }
@@ -550,7 +617,22 @@ fn typeinfer_enum_test() {
     typeinfer_statements_test_helper(
         "enum Hoge {Foo(Int)}; let a = Foo;",
         "a",
-        Ok(t_fun(Type::ttype("Int"), Type::ttype("Hoge"))),
+        Ok(t_fun(
+            Type::ttype("Int"),
+            Type::TVariant(vec![("Foo".to_owned(), vec![Type::ttype("Int")])]),
+        )),
+    )
+}
+
+#[test]
+fn typeinfer_match_test() {
+    typeinfer_statements_test_helper(
+        "enum Option {Some(Int), None}; let main = Some(3) match {
+            Some(x) => x,
+            None => 0
+        };",
+        "main",
+        Ok(Type::ttype("Int")),
     )
 }
 
@@ -582,6 +664,24 @@ fn unify(t1: &Type, t2: &Type) -> Result<(), TypeInferError> {
         }
         (Type::TVector(t1), Type::TVector(t2)) => unify(&t1, &t2),
         (Type::TRef(t1), Type::TRef(t2)) => unify(&t1, &t2),
+        (Type::TVariant(variants1), Type::TVariant(variants2)) => {
+            if variants1.len() != variants2.len() {
+                return Err(TypeInferError::UnifyError(t1.clone(), t2.clone()));
+            }
+            // 代数的データ型でのみVaritant型は使われるかつ、環境に同じ名前のVariantは一つのみなので、順番を考慮する必要は無い
+            for ((name1, tys1), (name2, tys2)) in variants1.iter().zip(variants2.iter()) {
+                if name1 != name2 {
+                    return Err(TypeInferError::UnifyError(t1.clone(), t2.clone()));
+                }
+                if tys1.len() != tys2.len() {
+                    return Err(TypeInferError::UnifyError(t1.clone(), t2.clone()));
+                }
+                for (ty1, ty2) in tys1.iter().zip(tys2.iter()) {
+                    unify(ty1, ty2)?;
+                }
+            }
+            Ok(())
+        }
         (t1, t2) => Err(TypeInferError::UnifyError(t1.clone(), t2.clone())),
     }
 }
@@ -595,6 +695,10 @@ fn occur(n: u64, t: &Type) -> bool {
         (_, Type::TQVar(n)) => false,
         (n, Type::TVector(ty)) => occur(n, &ty),
         (n, Type::TRef(ty)) => occur(n, &ty),
+        (n, Type::TVariant(variants)) => variants
+            .iter()
+            .map(|(_, tys)| tys)
+            .any(|tys| tys.iter().map(|ty| ty.simplify()).any(|ty| occur(n, &ty))),
     }
 }
 
