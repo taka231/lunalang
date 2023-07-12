@@ -10,6 +10,8 @@ pub enum TypeInferError {
     UnimplementedOperatorError(String),
     UndefinedVariable(String),
     InvalidArgumentPatternError(usize, usize),
+    VariantDoesNotHaveConstructor(Type, String),
+    ExpectedVariatButGot(Type),
 }
 
 impl Display for TypeInferError {
@@ -29,6 +31,12 @@ impl Display for TypeInferError {
                     "type error: {} arguments were expected but got {}.",
                     expected, fact
                 )
+            }
+            Self::ExpectedVariatButGot(ty) => {
+                write!(f, "type error: expected variant but got {}", ty)
+            }
+            Self::VariantDoesNotHaveConstructor(ty, name) => {
+                write!(f, "type error: {} does not have constructor {}", ty, name)
             }
         }
     }
