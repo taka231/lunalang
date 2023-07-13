@@ -10,6 +10,8 @@ pub enum Type {
     TFun(Box<Type>, Box<Type>),
     TVar(u64, Rc<RefCell<u64>>, Rc<RefCell<Option<Type>>>),
     TQVar(u64),
+    TRecVar(u64),
+    TRec(Box<Type>),
     TVector(Box<Type>),
     TRef(Box<Type>),
     TVariant(Vec<(String, Vec<Type>)>),
@@ -30,6 +32,55 @@ impl Type {
                     TypeInferError::VariantDoesNotHaveConstructor(self.clone(), name.to_owned())
                 }),
             _ => Err(TypeInferError::ExpectedVariatButGot(self.clone())),
+        }
+    }
+
+    fn unfold(&self, ty: &Type) -> Type {
+        fn go(t: &Type, ty: &Type) -> Type {
+            match t {
+                Type::TType(name) => Type::TType(name.clone()),
+                Type::TFun(t1, t2) => t_fun(go(&*t1, ty), go(&*t2, ty)),
+                Type::TVar(n, level, r) => Type::TVar(*n, Rc::clone(level), Rc::clone(r)),
+                Type::TQVar(n) => Type::TQVar(*n),
+                Type::TRecVar(_) => ty.clone(),
+                Type::TRec(t) => go(&*t, ty),
+                Type::TVector(t) => Type::TVector(Box::new(go(&*t, ty))),
+                Type::TRef(t) => Type::TRef(Box::new(go(&*t, ty))),
+                Type::TVariant(variants) => Type::TVariant(
+                    variants
+                        .iter()
+                        .map(|(name, tys)| {
+                            (name.to_owned(), tys.iter().map(|t| go(&t, ty)).collect())
+                        })
+                        .collect(),
+                ),
+            }
+        }
+        match self.simplify() {
+            Type::TRec(t) => go(&t, ty),
+            _ => self.clone(),
+        }
+    }
+
+    fn fold_variant(&self) -> Type {
+        match self.simplify() {
+            Type::TVariant(variants) => {
+                for (_, tys) in &variants {
+                    for ty in tys {
+                        match ty {
+                            Type::TRec(_) => {
+                                if self == &ty.unfold(ty) {
+                                    return ty.clone();
+                                }
+                            }
+
+                            _ => {}
+                        }
+                    }
+                }
+                return Type::TVariant(variants);
+            }
+            t => t.clone(),
         }
     }
 }
@@ -61,6 +112,8 @@ impl Type {
                     })
                     .collect(),
             ),
+            Type::TRecVar(n) => Type::TRecVar(*n),
+            Type::TRec(ty) => Type::TRec(Box::new(ty.simplify())),
         }
     }
 
@@ -195,6 +248,8 @@ impl Display for Type {
                     .collect::<Vec<String>>()
                     .join(" | ")
             ),
+            Type::TRecVar(n) => write!(f, "_rec{}", n),
+            Type::TRec(ty) => write!(f, "μ({})", ty),
         }
     }
 }
@@ -342,12 +397,13 @@ impl TypeInfer {
                 }
                 let result_ty = self.newTVar();
                 for (pattern, expr) in match_arms {
+                    unify(&ty, &self.peak_pattern(pattern)?)?;
                     let mut typeinfer = TypeInfer::from(
                         TypeEnv::new_enclosed_env(Rc::clone(&self.env)),
                         self.unassigned_num,
                         self.level,
                     );
-                    typeinfer.typeinfer_pattern(&pattern, &ty)?;
+                    typeinfer.typeinfer_pattern(&pattern, &ty.unfold(&ty))?;
                     unify(&result_ty, &typeinfer.typeinfer_expr(expr)?)?;
                     self.unassigned_num = typeinfer.unassigned_num
                 }
@@ -362,9 +418,24 @@ impl TypeInfer {
         Ok(ty)
     }
 
+    fn peak_pattern(&mut self, pattern: &Pattern) -> Result<Type, TypeInferError> {
+        match pattern {
+            Pattern::PValue(e) => self.typeinfer_expr(e),
+            Pattern::PConstructor(name, _) => {
+                let (_, ty) = self
+                    .env
+                    .borrow()
+                    .get(name)?
+                    .separate_to_args_and_resulttype();
+                Ok(ty)
+            }
+            Pattern::PVar(_) => Ok(self.newTVar()),
+        }
+    }
+
     fn typeinfer_pattern(&mut self, pattern: &Pattern, ty: &Type) -> Result<(), TypeInferError> {
         match pattern {
-            Pattern::PValue(value) => unify(&self.typeinfer_expr(value)?, ty)?,
+            Pattern::PValue(value) => unify(&self.typeinfer_expr(value)?, &ty)?,
             Pattern::PConstructor(name, patterns) => {
                 let args = ty.variant_to_type(name)?;
                 if args.len() != patterns.len() {
@@ -374,12 +445,14 @@ impl TypeInfer {
                     ));
                 }
                 for i in 0..args.len() {
-                    self.typeinfer_pattern(&patterns[i], &args[i])?;
+                    unify(&args[i], &self.peak_pattern(&patterns[i])?)?;
+                    self.typeinfer_pattern(&patterns[i], &args[i].unfold(&args[i]))?;
                 }
             }
             Pattern::PVar(var_name) => {
+                let ty = ty.fold_variant();
                 let new_type = self.newTVar();
-                unify(&new_type, ty)?;
+                unify(&new_type, &ty)?;
                 self.env.borrow_mut().insert(var_name.clone(), new_type)
             }
         };
@@ -396,18 +469,43 @@ impl TypeInfer {
                 self.generalize(&ty);
             }
             Statement::TypeDef(type_name, constructor_def_vec) => {
+                let mut has_recvar = false;
                 let variant_type = Type::TVariant(
                     constructor_def_vec
                         .iter()
-                        .map(|ConstructorDef { name, args }| (name.to_owned(), args.to_owned()))
+                        .map(|ConstructorDef { name, args }| {
+                            (
+                                name.to_owned(),
+                                args.iter()
+                                    .map(|t| match t {
+                                        Type::TType(name) if name == type_name => {
+                                            has_recvar = true;
+                                            Type::TRecVar(0)
+                                        }
+                                        _ => t.to_owned(),
+                                    })
+                                    .collect(),
+                            )
+                        })
                         .collect(),
                 );
+                let variant_type = if has_recvar {
+                    Type::TRec(Box::new(variant_type))
+                } else {
+                    variant_type
+                };
                 for ConstructorDef { name, args } in constructor_def_vec {
                     self.env.borrow_mut().insert(
                         name.to_owned(),
-                        args.iter()
-                            .rev()
-                            .fold(variant_type.clone(), |acm, ty| t_fun(ty.clone(), acm)),
+                        args.iter().rev().fold(variant_type.clone(), |acm, ty| {
+                            t_fun(
+                                match ty {
+                                    Type::TType(name) if name == type_name => variant_type.clone(),
+                                    _ => ty.to_owned(),
+                                },
+                                acm,
+                            )
+                        }),
                     )
                 }
             }
@@ -451,6 +549,8 @@ impl TypeInfer {
                         })
                         .collect(),
                 ),
+                Type::TRecVar(n) => Type::TRecVar(n),
+                Type::TRec(ty) => Type::TRec(Box::new(go(*ty, map, self_))),
             }
         }
         go(ty, &mut HashMap::new(), self)
@@ -476,6 +576,8 @@ impl TypeInfer {
                     }
                 }
             }
+            Type::TRecVar(_) => (),
+            Type::TRec(ty) => self.generalize(&*ty),
         }
     }
 }
@@ -682,6 +784,8 @@ fn unify(t1: &Type, t2: &Type) -> Result<(), TypeInferError> {
             }
             Ok(())
         }
+        (Type::TRecVar(n), Type::TRecVar(m)) if n == m => Ok(()),
+        (Type::TRec(ty1), Type::TRec(ty2)) => unify(&ty1, &ty2),
         (t1, t2) => Err(TypeInferError::UnifyError(t1.clone(), t2.clone())),
     }
 }
@@ -699,6 +803,8 @@ fn occur(n: u64, t: &Type) -> bool {
             .iter()
             .map(|(_, tys)| tys)
             .any(|tys| tys.iter().map(|ty| ty.simplify()).any(|ty| occur(n, &ty))),
+        (_, Type::TRecVar(_)) => false,
+        (n, Type::TRec(ty)) => occur(n, &ty),
     }
 }
 
