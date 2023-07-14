@@ -215,8 +215,55 @@ impl TypeEnv {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct TypeToTypeEnv {
+    env: HashMap<String, Type>,
+    outer: Option<Rc<RefCell<TypeToTypeEnv>>>,
+}
+
+impl TypeToTypeEnv {
+    pub fn new() -> Self {
+        TypeToTypeEnv {
+            env: Self::builtin(),
+            outer: None,
+        }
+    }
+    pub fn get(&self, name: &str) -> Result<Type, TypeInferError> {
+        match self.env.get(name) {
+            Some(ty) => Ok(ty.clone()),
+            None => match &self.outer {
+                None => Err(TypeInferError::UndefinedType(name.to_owned())),
+                Some(env) => env.borrow().get(name),
+            },
+        }
+    }
+    pub fn insert(&mut self, name: String, val: Type) -> Result<(), TypeInferError> {
+        if self.env.contains_key(&name) {
+            Err(TypeInferError::TypeAlreadyDefined(name))
+        } else {
+            self.env.insert(name, val);
+            Ok(())
+        }
+    }
+    pub fn new_enclosed_env(env: Rc<RefCell<TypeToTypeEnv>>) -> Self {
+        TypeToTypeEnv {
+            env: Self::builtin(),
+            outer: Some(env),
+        }
+    }
+    fn builtin() -> HashMap<String, Type> {
+        let mut builtin = HashMap::new();
+        builtin.insert("Int".to_owned(), Type::ttype("Int"));
+        builtin.insert("String".to_owned(), Type::ttype("String"));
+        builtin.insert("Bool".to_owned(), Type::ttype("Bool"));
+        builtin.insert("()".to_owned(), Type::ttype("()"));
+        builtin
+    }
+}
+
 pub struct TypeInfer {
     env: Rc<RefCell<TypeEnv>>,
+    type_to_type_env: Rc<RefCell<TypeToTypeEnv>>,
     unassigned_num: u64,
     level: u64,
 }
@@ -258,13 +305,20 @@ impl TypeInfer {
     pub fn new() -> Self {
         TypeInfer {
             env: Rc::new(RefCell::new(TypeEnv::new())),
+            type_to_type_env: Rc::new(RefCell::new(TypeToTypeEnv::new())),
             unassigned_num: 0,
             level: 0,
         }
     }
-    fn from(env: TypeEnv, unassigned_num: u64, level: u64) -> Self {
+    fn from(
+        env: TypeEnv,
+        type_to_type_env: TypeToTypeEnv,
+        unassigned_num: u64,
+        level: u64,
+    ) -> Self {
         TypeInfer {
             env: Rc::new(RefCell::new(env)),
+            type_to_type_env: Rc::new(RefCell::new(type_to_type_env)),
             unassigned_num,
             level,
         }
@@ -313,6 +367,7 @@ impl TypeInfer {
             Expr::EFun(arg, e) => {
                 let mut typeinfer = TypeInfer::from(
                     TypeEnv::new_enclosed_env(Rc::clone(&self.env)),
+                    TypeToTypeEnv::new_enclosed_env(Rc::clone(&self.type_to_type_env)),
                     self.unassigned_num,
                     self.level,
                 );
@@ -337,6 +392,7 @@ impl TypeInfer {
             Expr::EBlockExpr(asts) => {
                 let mut typeinfer = TypeInfer::from(
                     TypeEnv::new_enclosed_env(Rc::clone(&self.env)),
+                    TypeToTypeEnv::new_enclosed_env(Rc::clone(&self.type_to_type_env)),
                     self.unassigned_num,
                     self.level,
                 );
@@ -400,6 +456,7 @@ impl TypeInfer {
                     unify(&ty, &self.peak_pattern(pattern)?)?;
                     let mut typeinfer = TypeInfer::from(
                         TypeEnv::new_enclosed_env(Rc::clone(&self.env)),
+                        TypeToTypeEnv::new_enclosed_env(Rc::clone(&self.type_to_type_env)),
                         self.unassigned_num,
                         self.level,
                     );
@@ -469,49 +526,90 @@ impl TypeInfer {
                 self.generalize(&ty);
             }
             Statement::TypeDef(type_name, constructor_def_vec) => {
-                let mut has_recvar = false;
+                let has_recvar = RefCell::new(false);
                 let variant_type = Type::TVariant(
                     constructor_def_vec
                         .iter()
                         .map(|ConstructorDef { name, args }| {
-                            (
+                            Ok((
                                 name.to_owned(),
                                 args.iter()
-                                    .map(|t| match t {
-                                        Type::TType(name) if name == type_name => {
-                                            has_recvar = true;
-                                            Type::TRecVar(0)
-                                        }
-                                        _ => t.to_owned(),
+                                    .map(|t| {
+                                        self.replace_type(t, |name| {
+                                            if name == &type_name as &str {
+                                                *has_recvar.borrow_mut() = true;
+                                                Ok(Type::TRecVar(0))
+                                            } else {
+                                                self.type_to_type_env.borrow().get(&name)
+                                            }
+                                        })
                                     })
-                                    .collect(),
-                            )
+                                    .collect::<Result<_, _>>()?,
+                            ))
                         })
-                        .collect(),
+                        .collect::<Result<_, _>>()?,
                 );
-                let variant_type = if has_recvar {
+                let variant_type = if *has_recvar.borrow() {
                     Type::TRec(Box::new(variant_type))
                 } else {
                     variant_type
                 };
+                self.type_to_type_env
+                    .borrow_mut()
+                    .insert(type_name.to_owned(), variant_type.clone())?;
                 for ConstructorDef { name, args } in constructor_def_vec {
                     self.env.borrow_mut().insert(
                         name.to_owned(),
-                        args.iter().rev().fold(variant_type.clone(), |acm, ty| {
-                            t_fun(
-                                match ty {
-                                    Type::TType(name) if name == type_name => variant_type.clone(),
-                                    _ => ty.to_owned(),
-                                },
-                                acm,
-                            )
-                        }),
+                        args.iter()
+                            .rev()
+                            .try_fold(variant_type.clone(), |acm, ty| {
+                                Ok(t_fun(
+                                    self.replace_type(ty, |name| {
+                                        self.type_to_type_env.borrow().get(&name)
+                                    })?,
+                                    acm,
+                                ))
+                            })?,
                     )
                 }
             }
         }
         Ok(())
     }
+
+    fn replace_type(
+        &self,
+        ty: &Type,
+        replace_fn: impl Fn(&str) -> Result<Type, TypeInferError> + Clone,
+    ) -> Result<Type, TypeInferError> {
+        match ty.simplify() {
+            Type::TType(name) => replace_fn(&name),
+            Type::TFun(t1, t2) => Ok(t_fun(
+                self.replace_type(&t1, replace_fn.clone())?,
+                self.replace_type(&t2, replace_fn)?,
+            )),
+            Type::TVar(n, level, r) => Ok(Type::TVar(n, level, r)),
+            Type::TQVar(n) => Ok(Type::TQVar(n)),
+            Type::TRecVar(n) => Ok(Type::TRecVar(n)),
+            Type::TRec(ty) => Ok(Type::TRec(Box::new(self.replace_type(&ty, replace_fn)?))),
+            Type::TVector(ty) => Ok(Type::TVector(Box::new(self.replace_type(&ty, replace_fn)?))),
+            Type::TRef(ty) => Ok(Type::TRef(Box::new(self.replace_type(&ty, replace_fn)?))),
+            Type::TVariant(variants) => Ok(Type::TVariant(
+                variants
+                    .iter()
+                    .map(|(name, args)| {
+                        Ok((
+                            name.to_owned(),
+                            args.iter()
+                                .map(|t| self.replace_type(t, replace_fn.clone()))
+                                .collect::<Result<_, _>>()?,
+                        ))
+                    })
+                    .collect::<Result<_, _>>()?,
+            )),
+        }
+    }
+
     pub fn typeinfer_statements(&mut self, asts: &Statements) -> Result<(), TypeInferError> {
         for ast in asts {
             self.typeinfer_statement(ast)?;
@@ -717,13 +815,48 @@ fn typeinfer_fun_test() {
 #[test]
 fn typeinfer_enum_test() {
     typeinfer_statements_test_helper(
-        "enum Hoge {Foo(Int)}; let a = Foo;",
-        "a",
+        "enum Hoge {Foo(Int)}; let main = Foo;",
+        "main",
         Ok(t_fun(
             Type::ttype("Int"),
             Type::TVariant(vec![("Foo".to_owned(), vec![Type::ttype("Int")])]),
         )),
-    )
+    );
+    {
+        use crate::parser::parser_statements;
+        let mut typeinfer = TypeInfer::new();
+        assert_eq!(
+            typeinfer.typeinfer_statements(
+                &parser_statements("enum Hoge {Foo(Int)}; enum Hoge {Bar(Int)}; let main = 1;")
+                    .unwrap()
+                    .1
+            ),
+            Err(TypeInferError::TypeAlreadyDefined("Hoge".to_owned()))
+        );
+    };
+    typeinfer_statements_test_helper(
+        "enum List {Cons(Int, List), Nil};",
+        "Cons",
+        Ok(t_fun(
+            Type::ttype("Int"),
+            t_fun(
+                Type::TRec(Box::new(Type::TVariant(vec![
+                    (
+                        "Cons".to_owned(),
+                        vec![Type::ttype("Int"), Type::TRecVar(0)],
+                    ),
+                    ("Nil".to_owned(), vec![]),
+                ]))),
+                Type::TRec(Box::new(Type::TVariant(vec![
+                    (
+                        "Cons".to_owned(),
+                        vec![Type::ttype("Int"), Type::TRecVar(0)],
+                    ),
+                    ("Nil".to_owned(), vec![]),
+                ]))),
+            ),
+        )),
+    );
 }
 
 #[test]
