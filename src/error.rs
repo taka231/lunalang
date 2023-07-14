@@ -9,6 +9,8 @@ pub enum TypeInferError {
     OccurError(u64, Type),
     UnimplementedOperatorError(String),
     UndefinedVariable(String),
+    UndefinedType(String),
+    TypeAlreadyDefined(String),
     InvalidArgumentPatternError(usize, usize),
     VariantDoesNotHaveConstructor(Type, String),
     ExpectedVariatButGot(Type),
@@ -37,6 +39,12 @@ impl Display for TypeInferError {
             }
             Self::VariantDoesNotHaveConstructor(ty, name) => {
                 write!(f, "type error: {} does not have constructor {}", ty, name)
+            }
+            Self::UndefinedType(ty) => {
+                write!(f, "type error: {} is an undefined type", ty)
+            }
+            Self::TypeAlreadyDefined(name) => {
+                write!(f, "type error: type name {} is already used", name)
             }
         }
     }
