@@ -857,6 +857,37 @@ fn typeinfer_enum_test() {
             ),
         )),
     );
+    typeinfer_statements_test_helper(
+        "enum Hoge {Foo(Int)}; enum Huga {Bar(Hoge)};",
+        "Bar",
+        Ok(t_fun(
+            Type::TVariant(vec![("Foo".to_owned(), vec![Type::ttype("Int")])]),
+            Type::TVariant(vec![(
+                "Bar".to_owned(),
+                vec![Type::TVariant(vec![(
+                    "Foo".to_owned(),
+                    vec![Type::ttype("Int")],
+                )])],
+            )]),
+        )),
+    );
+    typeinfer_statements_test_helper(
+        "enum Hoge {Foo(Int)}; enum Huga {Bar(Hoge -> Int)};",
+        "Bar",
+        Ok(t_fun(
+            t_fun(
+                Type::TVariant(vec![("Foo".to_owned(), vec![Type::ttype("Int")])]),
+                Type::ttype("Int"),
+            ),
+            Type::TVariant(vec![(
+                "Bar".to_owned(),
+                vec![t_fun(
+                    Type::TVariant(vec![("Foo".to_owned(), vec![Type::ttype("Int")])]),
+                    Type::ttype("Int"),
+                )],
+            )]),
+        )),
+    )
 }
 
 #[test]
@@ -868,7 +899,38 @@ fn typeinfer_match_test() {
         };",
         "main",
         Ok(Type::ttype("Int")),
-    )
+    );
+    typeinfer_statements_test_helper(
+        "enum List {Cons(Int, List), Nil}; let main = Cons(3, Nil) match {
+            Cons(x, xs) => x,
+            Nil => 0
+        };",
+        "main",
+        Ok(Type::ttype("Int")),
+    );
+    typeinfer_statements_test_helper(
+        "enum List {Cons(Int, List), Nil}; let main = Cons(3, Cons(2, Nil)) match {
+            Cons(3, xs) => xs,
+            Nil => Nil
+        };",
+        "main",
+        Ok(Type::TRec(Box::new(Type::TVariant(vec![
+            (
+                "Cons".to_owned(),
+                vec![Type::ttype("Int"), Type::TRecVar(0)],
+            ),
+            ("Nil".to_owned(), vec![]),
+        ])))),
+    );
+    typeinfer_statements_test_helper(
+        "enum List {Cons(Int, List), Nil}; enum Pair {Pair(List, List)};
+        let main = Pair(Cons(1, Nil), Cons(2, Nil)) match {
+            Pair(Cons(x, xs), Cons(y, ys)) => x + y,
+            Pair(x, y) => 0
+        };",
+        "main",
+        Ok(Type::ttype("Int")),
+    );
 }
 
 fn unify(t1: &Type, t2: &Type) -> Result<(), TypeInferError> {
