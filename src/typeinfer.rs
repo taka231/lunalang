@@ -680,259 +680,6 @@ impl TypeInfer {
     }
 }
 
-#[test]
-fn typeinfer_expr_test() {
-    use crate::parser::parser_expr;
-    let mut typeinfer = TypeInfer::new();
-    assert_eq!(
-        typeinfer.typeinfer_expr(&parser_expr("1+1").unwrap().1),
-        Ok(Type::ttype("Int"))
-    );
-    assert_eq!(
-        typeinfer.typeinfer_expr(&parser_expr("3<2").unwrap().1),
-        Ok(Type::ttype("Bool"))
-    );
-    assert_eq!(
-        typeinfer.typeinfer_expr(&parser_expr("1%1").unwrap().1),
-        Ok(Type::ttype("Int"))
-    );
-    assert_eq!(
-        typeinfer.typeinfer_expr(&parser_expr("if (3>2) 1 else 2").unwrap().1),
-        Ok(Type::ttype("Int"))
-    );
-    assert_eq!(
-        typeinfer.typeinfer_expr(&parser_expr("if (3>2) 1 else 3>2").unwrap().1),
-        Err(TypeInferError::UnifyError(
-            Type::ttype("Int"),
-            Type::ttype("Bool")
-        ))
-    );
-    assert_eq!(
-        typeinfer.typeinfer_expr(&Expr::EString("hoge".to_owned())),
-        Ok(Type::ttype("String"))
-    );
-    assert_eq!(
-        typeinfer.typeinfer_expr(&parser_expr("()").unwrap().1),
-        Ok(Type::ttype("()"))
-    );
-    assert_eq!(
-        typeinfer
-            .typeinfer_expr(&parser_expr(r#"puts("Hello, world!")"#).unwrap().1)
-            .map(|ty| ty.simplify()),
-        Ok(Type::ttype("()"))
-    );
-    assert_eq!(
-        typeinfer.typeinfer_expr(&parser_expr("{let x = 1; x == 1;}").unwrap().1),
-        Ok(Type::ttype("Bool"))
-    );
-    assert_eq!(
-        typeinfer.typeinfer_expr(&parser_expr("{let x = 1;}").unwrap().1),
-        Ok(Type::ttype("()"))
-    );
-    assert_eq!(
-        typeinfer
-            .typeinfer_expr(&parser_expr("[1, 2, 3]").unwrap().1)
-            .map(|t| t.simplify()),
-        Ok(Type::TVector(Box::new(Type::ttype("Int"))))
-    );
-    assert_eq!(
-        typeinfer
-            .typeinfer_expr(&parser_expr("-1").unwrap().1)
-            .map(|t| t.simplify()),
-        Ok(Type::ttype("Int"))
-    );
-    assert_eq!(
-        typeinfer
-            .typeinfer_expr(&parser_expr("&3").unwrap().1)
-            .map(|t| t.simplify()),
-        Ok(Type::TRef(Box::new(Type::ttype("Int"))))
-    );
-    assert_eq!(
-        typeinfer
-            .typeinfer_expr(&parser_expr("*(&1)").unwrap().1)
-            .map(|t| t.simplify()),
-        Ok(Type::ttype("Int"))
-    );
-    assert_eq!(
-        typeinfer
-            .typeinfer_expr(&parser_expr("&3:=4").unwrap().1)
-            .map(|t| t.simplify()),
-        Ok(Type::ttype("()"))
-    );
-}
-
-fn typeinfer_statements_test_helper(str: &str, name: &str, ty: Result<Type, TypeInferError>) {
-    use crate::parser::parser_statements;
-    let mut typeinfer = TypeInfer::new();
-    typeinfer.typeinfer_statements(&parser_statements(str).unwrap().1);
-    assert_eq!(
-        Rc::clone(&typeinfer.env)
-            .borrow()
-            .get(name)
-            .map(|t| t.simplify()),
-        ty
-    )
-}
-
-#[test]
-fn typeinfer_statements_test() {
-    typeinfer_statements_test_helper("let a = 1;", "a", Ok(Type::ttype("Int")));
-    typeinfer_statements_test_helper("let a = 1; let b = a + 1;", "b", Ok(Type::ttype("Int")));
-}
-
-#[test]
-fn typeinfer_if_test() {
-    typeinfer_statements_test_helper(
-        "let a = 1; let b = if (a == 1) 3 > 2 else 4 < 2;",
-        "b",
-        Ok(Type::ttype("Bool")),
-    );
-}
-
-#[test]
-fn typeinfer_fun_test() {
-    typeinfer_statements_test_helper(
-        "let add(a, b) = a + b;",
-        "add",
-        Ok(t_fun(
-            Type::ttype("Int"),
-            t_fun(Type::ttype("Int"), Type::ttype("Int")),
-        )),
-    );
-    typeinfer_statements_test_helper(
-        "let add(a, b) = a + b; let a = add(2, 3);",
-        "a",
-        Ok(Type::ttype("Int")),
-    );
-    typeinfer_statements_test_helper("let id(x) = x; let a = id(2);", "a", Ok(Type::ttype("Int")));
-    typeinfer_statements_test_helper(
-        "let id(x) = x; let a = id(2);",
-        "id",
-        Ok(t_fun(Type::TQVar(1), Type::TQVar(1))),
-    );
-}
-
-#[test]
-fn typeinfer_enum_test() {
-    typeinfer_statements_test_helper(
-        "enum Hoge {Foo(Int)}; let main = Foo;",
-        "main",
-        Ok(t_fun(
-            Type::ttype("Int"),
-            Type::TVariant(vec![("Foo".to_owned(), vec![Type::ttype("Int")])]),
-        )),
-    );
-    {
-        use crate::parser::parser_statements;
-        let mut typeinfer = TypeInfer::new();
-        assert_eq!(
-            typeinfer.typeinfer_statements(
-                &parser_statements("enum Hoge {Foo(Int)}; enum Hoge {Bar(Int)}; let main = 1;")
-                    .unwrap()
-                    .1
-            ),
-            Err(TypeInferError::TypeAlreadyDefined("Hoge".to_owned()))
-        );
-    };
-    typeinfer_statements_test_helper(
-        "enum List {Cons(Int, List), Nil};",
-        "Cons",
-        Ok(t_fun(
-            Type::ttype("Int"),
-            t_fun(
-                Type::TRec(Box::new(Type::TVariant(vec![
-                    (
-                        "Cons".to_owned(),
-                        vec![Type::ttype("Int"), Type::TRecVar(0)],
-                    ),
-                    ("Nil".to_owned(), vec![]),
-                ]))),
-                Type::TRec(Box::new(Type::TVariant(vec![
-                    (
-                        "Cons".to_owned(),
-                        vec![Type::ttype("Int"), Type::TRecVar(0)],
-                    ),
-                    ("Nil".to_owned(), vec![]),
-                ]))),
-            ),
-        )),
-    );
-    typeinfer_statements_test_helper(
-        "enum Hoge {Foo(Int)}; enum Huga {Bar(Hoge)};",
-        "Bar",
-        Ok(t_fun(
-            Type::TVariant(vec![("Foo".to_owned(), vec![Type::ttype("Int")])]),
-            Type::TVariant(vec![(
-                "Bar".to_owned(),
-                vec![Type::TVariant(vec![(
-                    "Foo".to_owned(),
-                    vec![Type::ttype("Int")],
-                )])],
-            )]),
-        )),
-    );
-    typeinfer_statements_test_helper(
-        "enum Hoge {Foo(Int)}; enum Huga {Bar(Hoge -> Int)};",
-        "Bar",
-        Ok(t_fun(
-            t_fun(
-                Type::TVariant(vec![("Foo".to_owned(), vec![Type::ttype("Int")])]),
-                Type::ttype("Int"),
-            ),
-            Type::TVariant(vec![(
-                "Bar".to_owned(),
-                vec![t_fun(
-                    Type::TVariant(vec![("Foo".to_owned(), vec![Type::ttype("Int")])]),
-                    Type::ttype("Int"),
-                )],
-            )]),
-        )),
-    )
-}
-
-#[test]
-fn typeinfer_match_test() {
-    typeinfer_statements_test_helper(
-        "enum Option {Some(Int), None}; let main = Some(3) match {
-            Some(x) => x,
-            None => 0
-        };",
-        "main",
-        Ok(Type::ttype("Int")),
-    );
-    typeinfer_statements_test_helper(
-        "enum List {Cons(Int, List), Nil}; let main = Cons(3, Nil) match {
-            Cons(x, xs) => x,
-            Nil => 0
-        };",
-        "main",
-        Ok(Type::ttype("Int")),
-    );
-    typeinfer_statements_test_helper(
-        "enum List {Cons(Int, List), Nil}; let main = Cons(3, Cons(2, Nil)) match {
-            Cons(3, xs) => xs,
-            Nil => Nil
-        };",
-        "main",
-        Ok(Type::TRec(Box::new(Type::TVariant(vec![
-            (
-                "Cons".to_owned(),
-                vec![Type::ttype("Int"), Type::TRecVar(0)],
-            ),
-            ("Nil".to_owned(), vec![]),
-        ])))),
-    );
-    typeinfer_statements_test_helper(
-        "enum List {Cons(Int, List), Nil}; enum Pair {Pair(List, List)};
-        let main = Pair(Cons(1, Nil), Cons(2, Nil)) match {
-            Pair(Cons(x, xs), Cons(y, ys)) => x + y,
-            Pair(x, y) => 0
-        };",
-        "main",
-        Ok(Type::ttype("Int")),
-    );
-}
-
 fn unify(t1: &Type, t2: &Type) -> Result<(), TypeInferError> {
     match (t1.simplify(), t2.simplify()) {
         (t1, t2) if t1 == t2 => Ok(()),
@@ -1015,5 +762,234 @@ fn level_balance(t1: &Type, t2: &Type) {
             }
         }
         (_, _) => (),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::parser::parser_expr;
+    use rstest::rstest;
+
+    fn typeinfer_statements_test_helper(str: &str, name: &str, ty: Result<Type, TypeInferError>) {
+        use crate::parser::parser_statements;
+        let mut typeinfer = TypeInfer::new();
+        typeinfer.typeinfer_statements(&parser_statements(str).unwrap().1);
+        assert_eq!(
+            Rc::clone(&typeinfer.env)
+                .borrow()
+                .get(name)
+                .map(|t| t.simplify()),
+            ty
+        )
+    }
+
+    #[rstest]
+    #[case("1+1", Ok(Type::ttype("Int")))]
+    #[case("3<2", Ok(Type::ttype("Bool")))]
+    #[case("1%1", Ok(Type::ttype("Int")))]
+    #[case("if (3>2) 1 else 2", Ok(Type::ttype("Int")))]
+    #[case(
+        "if (3>2) 1 else 3>2",
+        Err(TypeInferError::UnifyError(Type::ttype("Int"), Type::ttype("Bool")))
+    )]
+    #[case("\"hoge\"", Ok(Type::ttype("String")))]
+    #[case("()", Ok(Type::ttype("()")))]
+    #[case(r#"puts("Hello, world!")"#, Ok(Type::ttype("()")))]
+    #[case("{let x = 1; x == 1;}", Ok(Type::ttype("Bool")))]
+    #[case(
+        "{let x = 1; x == \"hoge\";}",
+        Err(TypeInferError::UnifyError(Type::ttype("Int"), Type::ttype("String")))
+    )]
+    #[case("{let x = 1;}", Ok(Type::ttype("()")))]
+    #[case("[1, 2, 3]", Ok(Type::TVector(Box::new(Type::ttype("Int")))))]
+    #[case("-1", Ok(Type::ttype("Int")))]
+    #[case("&3", Ok(Type::TRef(Box::new(Type::ttype("Int")))))]
+    #[case("*(&1)", Ok(Type::ttype("Int")))]
+    #[case("&3:=4", Ok(Type::ttype("()")))]
+    fn test_typeinfer_expr(#[case] str: &str, #[case] ty: Result<Type, TypeInferError>) {
+        let mut typeinfer = TypeInfer::new();
+        assert_eq!(
+            typeinfer
+                .typeinfer_expr(&parser_expr(str).unwrap().1)
+                .map(|ty| ty.simplify()),
+            ty
+        );
+    }
+
+    #[rstest]
+    #[case("let a = 1;", "a", Ok(Type::ttype("Int")))]
+    #[case("let a = 1; let b = a + 1;", "b", Ok(Type::ttype("Int")))]
+    fn test_typeinfer_let(
+        #[case] str: &str,
+        #[case] var: &str,
+        #[case] ty: Result<Type, TypeInferError>,
+    ) {
+        typeinfer_statements_test_helper(str, var, ty);
+    }
+
+    #[rstest]
+    #[case(
+        "let a = 1; let b = if (a == 1) 3 > 2 else 4 < 2;",
+        "b",
+        Ok(Type::ttype("Bool"))
+    )]
+    fn test_typeinfer_if(
+        #[case] str: &str,
+        #[case] var: &str,
+        #[case] ty: Result<Type, TypeInferError>,
+    ) {
+        typeinfer_statements_test_helper(str, var, ty);
+    }
+
+    #[rstest]
+    #[case(
+        "let add(a, b) = a + b;",
+        "add",
+        Ok(t_fun(Type::ttype("Int"), t_fun(Type::ttype("Int"), Type::ttype("Int"))))
+    )]
+    #[case(
+        "let add(a, b) = a + b; let a = add(2, 3);",
+        "a",
+        Ok(Type::ttype("Int"))
+    )]
+    #[case("let id(x) = x; let a = id(2);", "a", Ok(Type::ttype("Int")))]
+    #[case(
+        "let id(x) = x; let a = id(2);",
+        "id",
+        Ok(t_fun(Type::TQVar(1), Type::TQVar(1)))
+    )]
+    fn test_typeinfer_fun(
+        #[case] str: &str,
+        #[case] var: &str,
+        #[case] ty: Result<Type, TypeInferError>,
+    ) {
+        typeinfer_statements_test_helper(str, var, ty);
+    }
+
+    #[test]
+    fn test_typeinfer_enum() {
+        typeinfer_statements_test_helper(
+            "enum Hoge {Foo(Int)};",
+            "Foo",
+            Ok(t_fun(
+                Type::ttype("Int"),
+                Type::TVariant(vec![("Foo".to_owned(), vec![Type::ttype("Int")])]),
+            )),
+        );
+        typeinfer_statements_test_helper(
+            "enum Hoge {Foo(Int)}; let main = Foo;",
+            "main",
+            Ok(t_fun(
+                Type::ttype("Int"),
+                Type::TVariant(vec![("Foo".to_owned(), vec![Type::ttype("Int")])]),
+            )),
+        );
+        {
+            use crate::parser::parser_statements;
+            let mut typeinfer = TypeInfer::new();
+            assert_eq!(
+                typeinfer.typeinfer_statements(
+                    &parser_statements("enum Hoge {Foo(Int)}; enum Hoge {Bar(Int)}; let main = 1;")
+                        .unwrap()
+                        .1
+                ),
+                Err(TypeInferError::TypeAlreadyDefined("Hoge".to_owned()))
+            );
+        };
+        typeinfer_statements_test_helper(
+            "enum List {Cons(Int, List), Nil};",
+            "Cons",
+            Ok(t_fun(
+                Type::ttype("Int"),
+                t_fun(
+                    Type::TRec(Box::new(Type::TVariant(vec![
+                        (
+                            "Cons".to_owned(),
+                            vec![Type::ttype("Int"), Type::TRecVar(0)],
+                        ),
+                        ("Nil".to_owned(), vec![]),
+                    ]))),
+                    Type::TRec(Box::new(Type::TVariant(vec![
+                        (
+                            "Cons".to_owned(),
+                            vec![Type::ttype("Int"), Type::TRecVar(0)],
+                        ),
+                        ("Nil".to_owned(), vec![]),
+                    ]))),
+                ),
+            )),
+        );
+        typeinfer_statements_test_helper(
+            "enum Hoge {Foo(Int)}; enum Huga {Bar(Hoge)};",
+            "Bar",
+            Ok(t_fun(
+                Type::TVariant(vec![("Foo".to_owned(), vec![Type::ttype("Int")])]),
+                Type::TVariant(vec![(
+                    "Bar".to_owned(),
+                    vec![Type::TVariant(vec![(
+                        "Foo".to_owned(),
+                        vec![Type::ttype("Int")],
+                    )])],
+                )]),
+            )),
+        );
+        typeinfer_statements_test_helper(
+            "enum Hoge {Foo(Int)}; enum Huga {Bar(Hoge -> Int)};",
+            "Bar",
+            Ok(t_fun(
+                t_fun(
+                    Type::TVariant(vec![("Foo".to_owned(), vec![Type::ttype("Int")])]),
+                    Type::ttype("Int"),
+                ),
+                Type::TVariant(vec![(
+                    "Bar".to_owned(),
+                    vec![t_fun(
+                        Type::TVariant(vec![("Foo".to_owned(), vec![Type::ttype("Int")])]),
+                        Type::ttype("Int"),
+                    )],
+                )]),
+            )),
+        )
+    }
+
+    #[rstest]
+    #[case(
+        "enum Option {Some(Int), None}; let main = Some(3) match {
+        Some(x) => x,
+        None => 0
+    };",
+        Ok(Type::ttype("Int"))
+    )]
+    #[case(
+        "enum List {Cons(Int, List), Nil}; let main = Cons(3, Nil) match {
+            Cons(x, xs) => x,
+            Nil => 0
+        };",
+        Ok(Type::ttype("Int"))
+    )]
+    #[case(
+        "enum List {Cons(Int, List), Nil}; let main = Cons(3, Cons(2, Nil)) match {
+            Cons(3, xs) => xs,
+            Nil => Nil
+        };",
+        Ok(Type::TRec(Box::new(Type::TVariant(vec![
+            (
+                "Cons".to_owned(),
+                vec![Type::ttype("Int"), Type::TRecVar(0)],
+            ),
+            ("Nil".to_owned(), vec![]),
+        ]))))
+    )]
+    #[case(
+        "enum List {Cons(Int, List), Nil}; enum Pair {Pair(List, List)};
+        let main = Pair(Cons(1, Nil), Cons(2, Nil)) match {
+            Pair(Cons(x, xs), Cons(y, ys)) => x + y,
+            Pair(x, y) => 0
+        };",
+        Ok(Type::ttype("Int"))
+    )]
+    fn typeinfer_match_test(#[case] str: &str, #[case] ty: Result<Type, TypeInferError>) {
+        typeinfer_statements_test_helper(str, "main", ty);
     }
 }
