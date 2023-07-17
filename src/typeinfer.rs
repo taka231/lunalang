@@ -1,7 +1,6 @@
 use crate::ast::{ConstructorDef, Expr, Pattern, Statement, StatementOrExpr, Statements};
 use crate::error::TypeInferError;
 use std::collections::HashMap;
-use std::fmt::write;
 use std::{cell::RefCell, fmt::Display, rc::Rc};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -989,7 +988,7 @@ mod tests {
         };",
         Ok(Type::ttype("Int"))
     )]
-    fn typeinfer_match_test(#[case] str: &str, #[case] ty: Result<Type, TypeInferError>) {
+    fn test_typeinfer_match(#[case] str: &str, #[case] ty: Result<Type, TypeInferError>) {
         typeinfer_statements_test_helper(str, "main", ty);
     }
 }
