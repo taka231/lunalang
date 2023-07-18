@@ -107,33 +107,6 @@ pub fn unary(input: &str) -> IResult<&str, Expr> {
     }
 }
 
-#[test]
-fn unary_test() {
-    assert_eq!(
-        parser_expr("-3"),
-        Ok(("", Expr::EUnary("-".to_owned(), Box::new(Expr::EInt(3)))))
-    );
-    assert_eq!(
-        parser_expr("*3"),
-        Ok(("", Expr::EUnary("*".to_owned(), Box::new(Expr::EInt(3)))))
-    );
-    assert_eq!(
-        parser_expr("&3"),
-        Ok(("", Expr::EUnary("&".to_owned(), Box::new(Expr::EInt(3)))))
-    );
-    assert_eq!(
-        parser_expr("-3+3"),
-        Ok((
-            "",
-            e_bin_op(
-                "+",
-                Expr::EUnary("-".to_owned(), Box::new(Expr::EInt(3))),
-                Expr::EInt(3)
-            )
-        ))
-    );
-}
-
 pub fn expr_op_7l(input: &str) -> IResult<&str, Expr> {
     let (input, e1) = unary(input)?;
     let (input, e2) = many0(|input| {
@@ -195,92 +168,6 @@ pub fn expr_op_0n(input: &str) -> IResult<&str, Expr> {
     }
 }
 
-#[test]
-fn test_expr_op() {
-    assert_eq!(
-        parser_expr("1 + 1"),
-        Ok(("", e_bin_op("+", e_int(1), e_int(1))))
-    );
-    assert_eq!(
-        parser_expr("1 + 1 * 1"),
-        Ok((
-            "",
-            e_bin_op("+", e_int(1), e_bin_op("*", e_int(1), e_int(1)))
-        ))
-    );
-    assert_eq!(
-        parser_expr("1 + (2 * 3)"),
-        Ok((
-            "",
-            e_bin_op("+", e_int(1), e_bin_op("*", e_int(2), e_int(3)))
-        ))
-    );
-    assert_eq!(
-        parser_expr("1<2"),
-        Ok(("", e_bin_op("<", e_int(1), e_int(2))))
-    );
-    assert_eq!(
-        parser_expr("1%2"),
-        Ok(("", e_bin_op("%", e_int(1), e_int(2))))
-    );
-    assert_eq!(
-        parser_expr("1<1+1"),
-        Ok((
-            "",
-            e_bin_op("<", e_int(1), e_bin_op("+", e_int(1), e_int(1)))
-        ))
-    );
-    assert_eq!(
-        parser_expr("a:=3"),
-        Ok(("", e_bin_op(":=", e_var("a"), e_int(3))))
-    );
-    assert_eq!(
-        parser_expr("a+b"),
-        Ok(("", e_bin_op("+", e_var("a"), e_var("b"))))
-    );
-    assert_eq!(
-        parser_expr("a + b"),
-        Ok(("", e_bin_op("+", e_var("a"), e_var("b"))))
-    );
-    assert_eq!(
-        parser_expr("add(2, 3)").unwrap().1,
-        e_fun_app(e_fun_app(e_var("add"), e_int(2)), e_int(3)),
-    )
-}
-
-#[test]
-fn test_expr_string() {
-    assert_eq!(
-        parser_expr(r#""Hello, world!""#),
-        Ok(("", e_string("Hello, world!")))
-    );
-    assert_eq!(parser_expr(r#""""#), Ok(("", e_string(""))));
-}
-
-#[test]
-fn test_unit() {
-    assert_eq!(parser_expr("()"), Ok(("", Expr::EUnit)))
-}
-
-#[test]
-fn test_expr_if() {
-    assert_eq!(
-        parser_expr("if (1<2) 1 else 2"),
-        Ok((
-            "",
-            e_if(e_bin_op("<", e_int(1), e_int(2)), e_int(1), e_int(2))
-        ))
-    );
-}
-
-#[test]
-fn test_fun_app() {
-    assert_eq!(
-        parser_expr("add(2, 3)").unwrap().1,
-        e_fun_app(e_fun_app(e_var("add"), e_int(2)), e_int(3)),
-    )
-}
-
 pub fn parser_match_expr(input: &str) -> IResult<&str, Expr> {
     let (input, e1) = expr_op_0n(input)?;
     let (input, match_arms) = opt(|input| {
@@ -299,37 +186,6 @@ pub fn parser_match_expr(input: &str) -> IResult<&str, Expr> {
         Some(match_arms) => Ok((input, Expr::EMatch(Box::new(e1), match_arms))),
         None => Ok((input, e1)),
     }
-}
-
-#[test]
-fn test_match_expr() {
-    assert_eq!(
-        parser_expr(
-            "hoge match {
-            Some(n) => n,
-            None => 0
-        }"
-        ),
-        Ok((
-            "",
-            Expr::EMatch(
-                Box::new(Expr::EVar("hoge".to_owned())),
-                vec![
-                    (
-                        Pattern::PConstructor(
-                            "Some".to_owned(),
-                            vec![Pattern::PVar("n".to_owned())]
-                        ),
-                        Expr::EVar("n".to_owned())
-                    ),
-                    (
-                        Pattern::PConstructor("None".to_owned(), vec![]),
-                        Expr::EInt(0)
-                    )
-                ]
-            )
-        ))
-    )
 }
 
 pub fn expr_if(input: &str) -> IResult<&str, Expr> {
@@ -359,47 +215,12 @@ pub fn fun_app(input: &str) -> IResult<&str, Expr> {
     }
 }
 
-#[test]
-fn fun_app_test() {
-    assert_eq!(
-        dot_expr("add(2, 3)").unwrap().1,
-        e_fun_app(e_fun_app(e_var("add"), e_int(2)), e_int(3)),
-    );
-    assert_eq!(
-        dot_expr("{add;}(2, 3)").unwrap().1,
-        e_fun_app(
-            e_fun_app(
-                Expr::EBlockExpr(vec![StatementOrExpr::Expr(e_var("add"))]),
-                e_int(2)
-            ),
-            e_int(3)
-        ),
-    );
-    assert_eq!(
-        dot_expr("add(2) {3;}").unwrap().1,
-        e_fun_app(
-            e_fun_app(e_var("add"), e_int(2)),
-            Expr::EBlockExpr(vec![StatementOrExpr::Expr(e_int(3))])
-        ),
-    );
-}
-
 pub fn expr_string(input: &str) -> IResult<&str, Expr> {
     let (input, _) = space0(input)?;
     let (input, _) = tag("\"")(input)?;
     let (input, str) = many0(none_of("\""))(input)?;
     let (input, _) = symbol("\"")(input)?;
     Ok((input, Expr::EString(str.iter().collect())))
-}
-
-#[test]
-fn expr_string_test() {
-    assert_eq!(
-        expr_string(r#""Hello, world!""#),
-        Ok(("", e_string("Hello, world!")))
-    );
-    assert_eq!(expr_string(r#""""#), Ok(("", e_string(""))));
-    assert_eq!(expr_string(r#"" ""#), Ok(("", e_string(" "))));
 }
 
 fn parse_block_expr(input: &str) -> IResult<&str, Expr> {
@@ -409,40 +230,6 @@ fn parse_block_expr(input: &str) -> IResult<&str, Expr> {
     Ok((input, Expr::EBlockExpr(statement_or_expr_vec)))
 }
 
-#[test]
-fn parse_block_expr_test() {
-    assert_eq!(
-        parse_block_expr(
-            "{
-        let x = 1;
-        x + 1;
-    }"
-        ),
-        Ok((
-            "",
-            Expr::EBlockExpr(vec![
-                StatementOrExpr::Statement(Statement::Assign("x".to_owned(), Expr::EInt(1))),
-                StatementOrExpr::Expr(e_bin_op("+", e_var("x"), e_int(1)))
-            ])
-        ))
-    );
-    assert_eq!(
-        parser_expr(
-            "{
-        let x = 1;
-        x + 1;
-    }"
-        ),
-        Ok((
-            "",
-            Expr::EBlockExpr(vec![
-                StatementOrExpr::Statement(Statement::Assign("x".to_owned(), Expr::EInt(1))),
-                StatementOrExpr::Expr(e_bin_op("+", e_var("x"), e_int(1)))
-            ])
-        ))
-    )
-}
-
 pub fn statement_assign(input: &str) -> IResult<&str, Statement> {
     let (input, _) = keyword("let")(input)?;
     let (input, id) = identifier(input)?;
@@ -450,14 +237,6 @@ pub fn statement_assign(input: &str) -> IResult<&str, Statement> {
     let (input, e) = parser_expr(input)?;
     let (input, _) = symbol(";")(input)?;
     Ok((input, Statement::Assign(id, e)))
-}
-
-#[test]
-fn statement_assign_test() {
-    assert_eq!(
-        statement_assign("let a = 1;").unwrap().1,
-        Statement::Assign("a".to_string(), e_int(1))
-    );
 }
 
 pub fn statement_typedef(input: &str) -> IResult<&str, Statement> {
@@ -482,87 +261,8 @@ pub fn statement_typedef(input: &str) -> IResult<&str, Statement> {
     Ok((input, Statement::TypeDef(id, constructors)))
 }
 
-#[test]
-fn statement_typedef_test() {
-    assert_eq!(
-        statement_typedef("enum Hoge {Foo(Bar, Huga), Huge};"),
-        Ok((
-            "",
-            Statement::TypeDef(
-                "Hoge".to_owned(),
-                vec![
-                    ConstructorDef {
-                        name: "Foo".to_owned(),
-                        args: vec![
-                            Type::TType("Bar".to_owned()),
-                            Type::TType("Huga".to_owned())
-                        ]
-                    },
-                    ConstructorDef {
-                        name: "Huge".to_owned(),
-                        args: vec![]
-                    }
-                ]
-            )
-        ))
-    )
-}
-
 pub fn parser_type_init(input: &str) -> IResult<&str, Type> {
     parser_fun_type(input)
-}
-
-#[test]
-fn parser_type_test() {
-    assert_eq!(
-        parser_type_init("Int"),
-        Ok(("", Type::TType("Int".to_owned())))
-    );
-    assert_eq!(
-        parser_type_init("Int -> Int"),
-        Ok((
-            "",
-            Type::TFun(
-                Box::new(Type::TType("Int".to_owned())),
-                Box::new(Type::TType("Int".to_owned())),
-            )
-        ))
-    );
-    assert_eq!(
-        parser_type_init("Int -> Bool -> Int"),
-        Ok((
-            "",
-            Type::TFun(
-                Box::new(Type::TType("Int".to_owned())),
-                Box::new(Type::TFun(
-                    Box::new(Type::TType("Bool".to_owned())),
-                    Box::new(Type::TType("Int".to_owned()))
-                )),
-            )
-        ))
-    );
-    assert_eq!(
-        parser_type_init("()"),
-        Ok(("", Type::TType("()".to_owned())))
-    );
-    assert_eq!(
-        parser_type_init("Ref[Int]"),
-        Ok(("", Type::TRef(Box::new(Type::TType("Int".to_owned())))))
-    );
-    assert_eq!(
-        parser_type_init("Vector[Bool]"),
-        Ok(("", Type::TVector(Box::new(Type::TType("Bool".to_owned())))))
-    );
-    assert_eq!(
-        parser_type_init("(Int -> Int)"),
-        Ok((
-            "",
-            Type::TFun(
-                Box::new(Type::TType("Int".to_owned())),
-                Box::new(Type::TType("Int".to_owned())),
-            )
-        ))
-    );
 }
 
 pub fn parser_fun_type(input: &str) -> IResult<&str, Type> {
@@ -630,17 +330,6 @@ pub fn fun_def(input: &str) -> IResult<&str, Statement> {
     Ok((input, Statement::Assign(id, result)))
 }
 
-#[test]
-pub fn fun_def_test() {
-    assert_eq!(
-        fun_def("let add(a, b) = a + b;").unwrap().1,
-        Statement::Assign(
-            "add".to_string(),
-            e_fun("a", e_fun("b", e_bin_op("+", e_var("a"), e_var("b"))))
-        )
-    )
-}
-
 fn identifier(input: &str) -> IResult<&str, String> {
     let (input, _) = multispace0(input)?;
     let (input, first_char) = one_of("abcdefghijklmnopqrstuvwxyz_")(input)?;
@@ -663,17 +352,6 @@ fn identifier(input: &str) -> IResult<&str, String> {
     Ok((input, ident))
 }
 
-#[test]
-fn identifier_test() {
-    assert_eq!(identifier("aA3B").unwrap().1, "aA3B".to_string());
-    assert!(identifier("PA3B").is_err());
-    assert_eq!(identifier("a3Bse").unwrap().1, "a3Bse".to_string());
-    assert_eq!(
-        identifier("int_to_string").unwrap().1,
-        "int_to_string".to_string()
-    );
-}
-
 pub fn identifier_start_with_capital(input: &str) -> IResult<&str, String> {
     let (input, _) = multispace0(input)?;
     let (input, first_char) = one_of("ABCDEFGHIJKLMNOPQRSTUVWXYZ")(input)?;
@@ -689,57 +367,10 @@ pub fn parser_statement(input: &str) -> IResult<&str, Statement> {
     Ok((input, statement))
 }
 
-#[test]
-pub fn parser_statement_test() {
-    assert_eq!(
-        parser_statement("let main = 1;").unwrap().1,
-        Statement::Assign("main".to_string(), e_int(1)),
-    );
-    assert_eq!(
-        parser_statement("let add(a, b) = a + b;").unwrap().1,
-        Statement::Assign(
-            "add".to_string(),
-            e_fun("a", e_fun("b", e_bin_op("+", e_var("a"), e_var("b"))))
-        )
-    );
-}
-
 pub fn parser_statements(input: &str) -> IResult<&str, Statements> {
     let (input, statements) = many1(parser_statement)(input)?;
     let (input, _) = eof(input)?;
     Ok((input, statements))
-}
-
-#[test]
-fn parser_statements_test() {
-    assert_eq!(
-        parser_statements("let main = 1;").unwrap().1,
-        vec![Statement::Assign("main".to_string(), e_int(1)),]
-    );
-    assert_eq!(
-        parser_statements("let main = a + b;").unwrap().1,
-        vec![Statement::Assign(
-            "main".to_string(),
-            e_bin_op("+", e_var("a"), e_var("b"))
-        ),]
-    );
-    assert_eq!(
-        parser_statements("let a = 1; let b = 2;").unwrap().1,
-        vec![
-            Statement::Assign("a".to_string(), e_int(1)),
-            Statement::Assign("b".to_string(), e_int(2))
-        ]
-    );
-    assert_eq!(
-        parser_statements("let a = 1; let b = 2; let main = a + b;")
-            .unwrap()
-            .1,
-        vec![
-            Statement::Assign("a".to_string(), e_int(1)),
-            Statement::Assign("b".to_string(), e_int(2)),
-            Statement::Assign("main".to_string(), e_bin_op("+", e_var("a"), e_var("b")))
-        ]
-    )
 }
 
 pub fn parser_expr<'a>(input: &'a str) -> IResult<&'a str, Expr> {
@@ -809,71 +440,6 @@ pub fn dot_expr(input: &str) -> IResult<&str, Expr> {
     Ok((input, expr))
 }
 
-#[test]
-fn test_dot_expr() {
-    assert_eq!(
-        dot_expr("3.inc"),
-        Ok(("", e_fun_app(e_var("inc"), Expr::EInt(3))))
-    );
-    assert_eq!(
-        dot_expr("3.inc()"),
-        Ok(("", e_fun_app(e_var("inc"), Expr::EInt(3))))
-    );
-    assert_eq!(
-        dot_expr("3.add(2)"),
-        Ok((
-            "",
-            e_fun_app(e_fun_app(e_var("add"), Expr::EInt(2)), Expr::EInt(3))
-        ))
-    );
-    assert_eq!(
-        dot_expr("add(2, 3).inc"),
-        Ok((
-            "",
-            e_fun_app(
-                e_var("inc"),
-                e_fun_app(e_fun_app(e_var("add"), Expr::EInt(2)), Expr::EInt(3))
-            )
-        ))
-    );
-    assert_eq!(
-        dot_expr("3.add(2).add(4)"),
-        Ok((
-            "",
-            e_fun_app(
-                e_fun_app(e_var("add"), Expr::EInt(4)),
-                e_fun_app(e_fun_app(e_var("add"), Expr::EInt(2)), Expr::EInt(3))
-            )
-        ))
-    );
-    assert_eq!(
-        dot_expr("3.add {2;}"),
-        Ok((
-            "",
-            e_fun_app(
-                e_fun_app(
-                    e_var("add"),
-                    Expr::EBlockExpr(vec![StatementOrExpr::Expr(Expr::EInt(2))])
-                ),
-                Expr::EInt(3)
-            )
-        ))
-    );
-    assert_eq!(
-        dot_expr("3.add() {2;}"),
-        Ok((
-            "",
-            e_fun_app(
-                e_fun_app(
-                    e_var("add"),
-                    Expr::EBlockExpr(vec![StatementOrExpr::Expr(Expr::EInt(2))])
-                ),
-                Expr::EInt(3)
-            )
-        ))
-    );
-}
-
 pub fn lambda_fn(input: &str) -> IResult<&str, Expr> {
     let (input, _) = symbol("fn")(input)?;
     let (input, args) = separated_list0(symbol(","), identifier)(input)?;
@@ -884,11 +450,6 @@ pub fn lambda_fn(input: &str) -> IResult<&str, Expr> {
         e = Expr::EFun(args[index].to_owned(), Box::new(e))
     }
     Ok((input, e))
-}
-
-#[test]
-fn test_lambda_fn() {
-    assert_eq!(lambda_fn("fn x -> x"), Ok(("", e_fun("x", e_var("x")))));
 }
 
 pub fn lambda_block_fn(input: &str) -> IResult<&str, Expr> {
@@ -906,39 +467,6 @@ pub fn lambda_block_fn(input: &str) -> IResult<&str, Expr> {
     Ok((input, expr))
 }
 
-#[test]
-fn test_lambda_block() {
-    assert_eq!(
-        lambda_block_fn("{fn x -> x; x;}"),
-        Ok((
-            "",
-            e_fun(
-                "x",
-                Expr::EBlockExpr(vec![
-                    StatementOrExpr::Expr(e_var("x")),
-                    StatementOrExpr::Expr(e_var("x"))
-                ])
-            )
-        ))
-    );
-    assert_eq!(
-        parser_expr("hoge {fn x -> x; x;}"),
-        Ok((
-            "",
-            e_fun_app(
-                e_var("hoge"),
-                e_fun(
-                    "x",
-                    Expr::EBlockExpr(vec![
-                        StatementOrExpr::Expr(e_var("x")),
-                        StatementOrExpr::Expr(e_var("x"))
-                    ])
-                )
-            )
-        ))
-    );
-}
-
 pub fn expr_vector(input: &str) -> IResult<&str, Expr> {
     let (input, vec) = delimited(
         symbol("["),
@@ -946,17 +474,6 @@ pub fn expr_vector(input: &str) -> IResult<&str, Expr> {
         symbol("]"),
     )(input)?;
     Ok((input, Expr::EVector(vec)))
-}
-
-#[test]
-fn test_expr_vector() {
-    assert_eq!(
-        expr_vector("[1, 2, 3]"),
-        Ok((
-            "",
-            Expr::EVector(vec![Expr::EInt(1), Expr::EInt(2), Expr::EInt(3)])
-        ))
-    );
 }
 
 pub fn for_in_expr(input: &str) -> IResult<&str, Expr> {
@@ -1000,43 +517,6 @@ pub fn parser_pattern(input: &str) -> IResult<&str, Pattern> {
     ))(input)
 }
 
-#[test]
-fn test_parser_pattern() {
-    assert_eq!(
-        parser_pattern("3"),
-        Ok(("", Pattern::PValue(Expr::EInt(3))))
-    );
-    assert_eq!(parser_pattern("()"), Ok(("", Pattern::PValue(Expr::EUnit))));
-    assert_eq!(parser_pattern("n"), Ok(("", Pattern::PVar("n".to_owned()))));
-    assert_eq!(
-        parser_pattern("Foo(3)"),
-        Ok((
-            "",
-            Pattern::PConstructor("Foo".to_owned(), vec![Pattern::PValue(Expr::EInt(3))])
-        ))
-    );
-    assert_eq!(
-        parser_pattern("Foo(x)"),
-        Ok((
-            "",
-            Pattern::PConstructor("Foo".to_owned(), vec![Pattern::PVar("x".to_owned())])
-        ))
-    );
-    assert_eq!(
-        parser_pattern("Foo(3, x)"),
-        Ok((
-            "",
-            Pattern::PConstructor(
-                "Foo".to_owned(),
-                vec![
-                    Pattern::PValue(Expr::EInt(3)),
-                    Pattern::PVar("x".to_owned())
-                ]
-            )
-        ))
-    );
-}
-
 pub fn parser_variable_pattern(input: &str) -> IResult<&str, Pattern> {
     let (input, var) = identifier(input)?;
     Ok((input, Pattern::PVar(var)))
@@ -1059,5 +539,531 @@ pub fn parser_constructor_pattern(input: &str) -> IResult<&str, Pattern> {
     match args {
         Some(args) => Ok((input, Pattern::PConstructor(name, args))),
         None => Ok((input, Pattern::PConstructor(name, vec![]))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn test_unary_expr() {
+        assert_eq!(
+            parser_expr("-3"),
+            Ok(("", Expr::EUnary("-".to_owned(), Box::new(Expr::EInt(3)))))
+        );
+        assert_eq!(
+            parser_expr("*3"),
+            Ok(("", Expr::EUnary("*".to_owned(), Box::new(Expr::EInt(3)))))
+        );
+        assert_eq!(
+            parser_expr("&3"),
+            Ok(("", Expr::EUnary("&".to_owned(), Box::new(Expr::EInt(3)))))
+        );
+        assert_eq!(
+            parser_expr("-3+3"),
+            Ok((
+                "",
+                e_bin_op(
+                    "+",
+                    Expr::EUnary("-".to_owned(), Box::new(Expr::EInt(3))),
+                    Expr::EInt(3)
+                )
+            ))
+        );
+    }
+
+    #[test]
+    fn test_op_expr() {
+        assert_eq!(
+            parser_expr("1 + 1"),
+            Ok(("", e_bin_op("+", e_int(1), e_int(1))))
+        );
+        assert_eq!(
+            parser_expr("1 + 1 * 1"),
+            Ok((
+                "",
+                e_bin_op("+", e_int(1), e_bin_op("*", e_int(1), e_int(1)))
+            ))
+        );
+        assert_eq!(
+            parser_expr("1 + (2 * 3)"),
+            Ok((
+                "",
+                e_bin_op("+", e_int(1), e_bin_op("*", e_int(2), e_int(3)))
+            ))
+        );
+        assert_eq!(
+            parser_expr("1<2"),
+            Ok(("", e_bin_op("<", e_int(1), e_int(2))))
+        );
+        assert_eq!(
+            parser_expr("1%2"),
+            Ok(("", e_bin_op("%", e_int(1), e_int(2))))
+        );
+        assert_eq!(
+            parser_expr("1<1+1"),
+            Ok((
+                "",
+                e_bin_op("<", e_int(1), e_bin_op("+", e_int(1), e_int(1)))
+            ))
+        );
+        assert_eq!(
+            parser_expr("a:=3"),
+            Ok(("", e_bin_op(":=", e_var("a"), e_int(3))))
+        );
+        assert_eq!(
+            parser_expr("a+b"),
+            Ok(("", e_bin_op("+", e_var("a"), e_var("b"))))
+        );
+        assert_eq!(
+            parser_expr("a + b"),
+            Ok(("", e_bin_op("+", e_var("a"), e_var("b"))))
+        );
+        assert_eq!(
+            parser_expr("add(2, 3)"),
+            Ok(("", e_fun_app(e_fun_app(e_var("add"), e_int(2)), e_int(3)))),
+        )
+    }
+
+    #[test]
+    fn test_string_expr() {
+        assert_eq!(
+            parser_expr(r#""Hello, world!""#),
+            Ok(("", e_string("Hello, world!")))
+        );
+        assert_eq!(parser_expr(r#""""#), Ok(("", e_string(""))));
+        assert_eq!(expr_string(r#"" ""#), Ok(("", e_string(" "))));
+    }
+
+    #[test]
+    fn test_unit_expr() {
+        assert_eq!(parser_expr("()"), Ok(("", Expr::EUnit)))
+    }
+
+    #[test]
+    fn test_if_expr() {
+        assert_eq!(
+            parser_expr("if (1<2) 1 else 2"),
+            Ok((
+                "",
+                e_if(e_bin_op("<", e_int(1), e_int(2)), e_int(1), e_int(2))
+            ))
+        );
+    }
+
+    #[test]
+    fn test_fun_app() {
+        assert_eq!(
+            parser_expr("add(2, 3)"),
+            Ok(("", e_fun_app(e_fun_app(e_var("add"), e_int(2)), e_int(3)))),
+        );
+        assert_eq!(
+            dot_expr("{add;}(2, 3)"),
+            Ok((
+                "",
+                e_fun_app(
+                    e_fun_app(
+                        Expr::EBlockExpr(vec![StatementOrExpr::Expr(e_var("add"))]),
+                        e_int(2)
+                    ),
+                    e_int(3)
+                )
+            )),
+        );
+        assert_eq!(
+            dot_expr("add(2) {3;}"),
+            Ok((
+                "",
+                e_fun_app(
+                    e_fun_app(e_var("add"), e_int(2)),
+                    Expr::EBlockExpr(vec![StatementOrExpr::Expr(e_int(3))])
+                )
+            )),
+        );
+    }
+
+    #[test]
+    fn test_match_expr() {
+        assert_eq!(
+            parser_expr(
+                "hoge match {
+            Some(n) => n,
+            None => 0
+        }"
+            ),
+            Ok((
+                "",
+                Expr::EMatch(
+                    Box::new(Expr::EVar("hoge".to_owned())),
+                    vec![
+                        (
+                            Pattern::PConstructor(
+                                "Some".to_owned(),
+                                vec![Pattern::PVar("n".to_owned())]
+                            ),
+                            Expr::EVar("n".to_owned())
+                        ),
+                        (
+                            Pattern::PConstructor("None".to_owned(), vec![]),
+                            Expr::EInt(0)
+                        )
+                    ]
+                )
+            ))
+        )
+    }
+
+    #[test]
+    fn test_parse_block_expr() {
+        assert_eq!(
+            parse_block_expr(
+                "{
+        let x = 1;
+        x + 1;
+    }"
+            ),
+            Ok((
+                "",
+                Expr::EBlockExpr(vec![
+                    StatementOrExpr::Statement(Statement::Assign("x".to_owned(), Expr::EInt(1))),
+                    StatementOrExpr::Expr(e_bin_op("+", e_var("x"), e_int(1)))
+                ])
+            ))
+        );
+        assert_eq!(
+            parser_expr(
+                "{
+        let x = 1;
+        x + 1;
+    }"
+            ),
+            Ok((
+                "",
+                Expr::EBlockExpr(vec![
+                    StatementOrExpr::Statement(Statement::Assign("x".to_owned(), Expr::EInt(1))),
+                    StatementOrExpr::Expr(e_bin_op("+", e_var("x"), e_int(1)))
+                ])
+            ))
+        )
+    }
+
+    #[test]
+    fn test_assign_statement() {
+        assert_eq!(
+            statement_assign("let a = 1;"),
+            Ok(("", Statement::Assign("a".to_string(), e_int(1))))
+        );
+    }
+
+    #[test]
+    fn test_typedef_statement() {
+        assert_eq!(
+            statement_typedef("enum Hoge {Foo(Bar, Huga), Huge};"),
+            Ok((
+                "",
+                Statement::TypeDef(
+                    "Hoge".to_owned(),
+                    vec![
+                        ConstructorDef {
+                            name: "Foo".to_owned(),
+                            args: vec![
+                                Type::TType("Bar".to_owned()),
+                                Type::TType("Huga".to_owned())
+                            ]
+                        },
+                        ConstructorDef {
+                            name: "Huge".to_owned(),
+                            args: vec![]
+                        }
+                    ]
+                )
+            ))
+        )
+    }
+
+    #[test]
+    fn test_parser_type() {
+        assert_eq!(
+            parser_type_init("Int"),
+            Ok(("", Type::TType("Int".to_owned())))
+        );
+        assert_eq!(
+            parser_type_init("Int -> Int"),
+            Ok((
+                "",
+                Type::TFun(
+                    Box::new(Type::TType("Int".to_owned())),
+                    Box::new(Type::TType("Int".to_owned())),
+                )
+            ))
+        );
+        assert_eq!(
+            parser_type_init("Int -> Bool -> Int"),
+            Ok((
+                "",
+                Type::TFun(
+                    Box::new(Type::TType("Int".to_owned())),
+                    Box::new(Type::TFun(
+                        Box::new(Type::TType("Bool".to_owned())),
+                        Box::new(Type::TType("Int".to_owned()))
+                    )),
+                )
+            ))
+        );
+        assert_eq!(
+            parser_type_init("()"),
+            Ok(("", Type::TType("()".to_owned())))
+        );
+        assert_eq!(
+            parser_type_init("Ref[Int]"),
+            Ok(("", Type::TRef(Box::new(Type::TType("Int".to_owned())))))
+        );
+        assert_eq!(
+            parser_type_init("Vector[Bool]"),
+            Ok(("", Type::TVector(Box::new(Type::TType("Bool".to_owned())))))
+        );
+        assert_eq!(
+            parser_type_init("(Int -> Int)"),
+            Ok((
+                "",
+                Type::TFun(
+                    Box::new(Type::TType("Int".to_owned())),
+                    Box::new(Type::TType("Int".to_owned())),
+                )
+            ))
+        );
+    }
+
+    #[test]
+    pub fn test_fun_def() {
+        assert_eq!(
+            fun_def("let add(a, b) = a + b;"),
+            Ok((
+                "",
+                Statement::Assign(
+                    "add".to_string(),
+                    e_fun("a", e_fun("b", e_bin_op("+", e_var("a"), e_var("b"))))
+                )
+            ))
+        )
+    }
+
+    #[test]
+    fn test_identifier() {
+        assert_eq!(identifier("aA3B").unwrap().1, "aA3B".to_string());
+        assert!(identifier("PA3B").is_err());
+        assert_eq!(identifier("a3Bse").unwrap().1, "a3Bse".to_string());
+        assert_eq!(
+            identifier("int_to_string").unwrap().1,
+            "int_to_string".to_string()
+        );
+    }
+
+    #[test]
+    pub fn test_parser_statement() {
+        assert_eq!(
+            parser_statement("let main = 1;"),
+            Ok(("", Statement::Assign("main".to_string(), e_int(1)))),
+        );
+        assert_eq!(
+            parser_statement("let add(a, b) = a + b;"),
+            Ok((
+                "",
+                Statement::Assign(
+                    "add".to_string(),
+                    e_fun("a", e_fun("b", e_bin_op("+", e_var("a"), e_var("b"))))
+                )
+            ))
+        );
+    }
+
+    #[test]
+    fn test_parser_statements() {
+        assert_eq!(
+            parser_statements("let main = 1;"),
+            Ok(("", vec![Statement::Assign("main".to_string(), e_int(1))]))
+        );
+        assert_eq!(
+            parser_statements("let main = a + b;"),
+            Ok((
+                "",
+                vec![Statement::Assign(
+                    "main".to_string(),
+                    e_bin_op("+", e_var("a"), e_var("b"))
+                ),]
+            ))
+        );
+        assert_eq!(
+            parser_statements("let a = 1; let b = 2;"),
+            Ok((
+                "",
+                vec![
+                    Statement::Assign("a".to_string(), e_int(1)),
+                    Statement::Assign("b".to_string(), e_int(2))
+                ]
+            ))
+        );
+        assert_eq!(
+            parser_statements("let a = 1; let b = 2; let main = a + b;"),
+            Ok((
+                "",
+                vec![
+                    Statement::Assign("a".to_string(), e_int(1)),
+                    Statement::Assign("b".to_string(), e_int(2)),
+                    Statement::Assign("main".to_string(), e_bin_op("+", e_var("a"), e_var("b")))
+                ]
+            ))
+        )
+    }
+
+    #[test]
+    fn test_dot_expr() {
+        assert_eq!(
+            dot_expr("3.inc"),
+            Ok(("", e_fun_app(e_var("inc"), Expr::EInt(3))))
+        );
+        assert_eq!(
+            dot_expr("3.inc()"),
+            Ok(("", e_fun_app(e_var("inc"), Expr::EInt(3))))
+        );
+        assert_eq!(
+            dot_expr("3.add(2)"),
+            Ok((
+                "",
+                e_fun_app(e_fun_app(e_var("add"), Expr::EInt(2)), Expr::EInt(3))
+            ))
+        );
+        assert_eq!(
+            dot_expr("add(2, 3).inc"),
+            Ok((
+                "",
+                e_fun_app(
+                    e_var("inc"),
+                    e_fun_app(e_fun_app(e_var("add"), Expr::EInt(2)), Expr::EInt(3))
+                )
+            ))
+        );
+        assert_eq!(
+            dot_expr("3.add(2).add(4)"),
+            Ok((
+                "",
+                e_fun_app(
+                    e_fun_app(e_var("add"), Expr::EInt(4)),
+                    e_fun_app(e_fun_app(e_var("add"), Expr::EInt(2)), Expr::EInt(3))
+                )
+            ))
+        );
+        assert_eq!(
+            dot_expr("3.add {2;}"),
+            Ok((
+                "",
+                e_fun_app(
+                    e_fun_app(
+                        e_var("add"),
+                        Expr::EBlockExpr(vec![StatementOrExpr::Expr(Expr::EInt(2))])
+                    ),
+                    Expr::EInt(3)
+                )
+            ))
+        );
+        assert_eq!(
+            dot_expr("3.add() {2;}"),
+            Ok((
+                "",
+                e_fun_app(
+                    e_fun_app(
+                        e_var("add"),
+                        Expr::EBlockExpr(vec![StatementOrExpr::Expr(Expr::EInt(2))])
+                    ),
+                    Expr::EInt(3)
+                )
+            ))
+        );
+    }
+
+    #[test]
+    fn test_lambda_fn() {
+        assert_eq!(lambda_fn("fn x -> x"), Ok(("", e_fun("x", e_var("x")))));
+    }
+
+    #[test]
+    fn test_lambda_block() {
+        assert_eq!(
+            lambda_block_fn("{fn x -> x; x;}"),
+            Ok((
+                "",
+                e_fun(
+                    "x",
+                    Expr::EBlockExpr(vec![
+                        StatementOrExpr::Expr(e_var("x")),
+                        StatementOrExpr::Expr(e_var("x"))
+                    ])
+                )
+            ))
+        );
+        assert_eq!(
+            parser_expr("hoge {fn x -> x; x;}"),
+            Ok((
+                "",
+                e_fun_app(
+                    e_var("hoge"),
+                    e_fun(
+                        "x",
+                        Expr::EBlockExpr(vec![
+                            StatementOrExpr::Expr(e_var("x")),
+                            StatementOrExpr::Expr(e_var("x"))
+                        ])
+                    )
+                )
+            ))
+        );
+    }
+
+    #[test]
+    fn test_vector_expr() {
+        assert_eq!(
+            expr_vector("[1, 2, 3]"),
+            Ok((
+                "",
+                Expr::EVector(vec![Expr::EInt(1), Expr::EInt(2), Expr::EInt(3)])
+            ))
+        );
+    }
+
+    #[test]
+    fn test_parser_pattern() {
+        assert_eq!(
+            parser_pattern("3"),
+            Ok(("", Pattern::PValue(Expr::EInt(3))))
+        );
+        assert_eq!(parser_pattern("()"), Ok(("", Pattern::PValue(Expr::EUnit))));
+        assert_eq!(parser_pattern("n"), Ok(("", Pattern::PVar("n".to_owned()))));
+        assert_eq!(
+            parser_pattern("Foo(3)"),
+            Ok((
+                "",
+                Pattern::PConstructor("Foo".to_owned(), vec![Pattern::PValue(Expr::EInt(3))])
+            ))
+        );
+        assert_eq!(
+            parser_pattern("Foo(x)"),
+            Ok((
+                "",
+                Pattern::PConstructor("Foo".to_owned(), vec![Pattern::PVar("x".to_owned())])
+            ))
+        );
+        assert_eq!(
+            parser_pattern("Foo(3, x)"),
+            Ok((
+                "",
+                Pattern::PConstructor(
+                    "Foo".to_owned(),
+                    vec![
+                        Pattern::PValue(Expr::EInt(3)),
+                        Pattern::PVar("x".to_owned())
+                    ]
+                )
+            ))
+        );
     }
 }
