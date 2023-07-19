@@ -350,97 +350,101 @@ impl Eval {
     }
 }
 
-fn test_eval_expr_helper(str: &str, v: Result<Value, EvalError>) {
+#[cfg(test)]
+mod tests {
+    use super::*;
     use crate::parser::parser_expr;
-    let eval = Eval::new();
-    assert_eq!(eval.eval_expr(parser_expr(str).unwrap().1), v)
-}
-
-#[test]
-fn test_op_expr() {
-    test_eval_expr_helper("3*3+4*4", Ok(v_int(25)));
-    test_eval_expr_helper("4+(6/3)-2", Ok(v_int(4)));
-    test_eval_expr_helper("2+4/2/2", Ok(v_int(3)));
-    test_eval_expr_helper("3>2", Ok(v_bool(true)));
-    test_eval_expr_helper("3<2", Ok(v_bool(false)));
-    test_eval_expr_helper("2>=2", Ok(v_bool(true)));
-    test_eval_expr_helper("2<=3", Ok(v_bool(true)));
-    test_eval_expr_helper("2==3", Ok(v_bool(false)));
-    test_eval_expr_helper("2!=3", Ok(v_bool(true)));
-    test_eval_expr_helper("4%3", Ok(v_int(1)));
-    test_eval_expr_helper("&3", Ok(Value::VRef(Rc::new(RefCell::new(Value::VInt(3))))));
-    test_eval_expr_helper("*(&3)", Ok(Value::VInt(3)));
-}
-
-#[test]
-fn test_if_expr() {
-    test_eval_expr_helper("if (3>2) 1 else 2", Ok(v_int(1)));
-    test_eval_expr_helper("if (3<2) 1 else 2", Ok(v_int(2)));
-    test_eval_expr_helper("if (3<2) 1 else if (4==4) 2 else 3", Ok(v_int(2)));
-}
-
-#[test]
-fn test_string_expr() {
-    test_eval_expr_helper(
-        r#""Hello, world!""#,
-        Ok(Value::VString("Hello, world!".to_owned())),
-    )
-}
-
-#[test]
-fn test_unit_expr() {
-    test_eval_expr_helper("()", Ok(Value::VUnit))
-}
-
-#[test]
-fn test_block_expr() {
-    test_eval_expr_helper("{let x = 1; x + 3;}", Ok(Value::VInt(4)));
-    test_eval_expr_helper("{let x = 1;}", Ok(Value::VUnit));
-}
-
-fn test_eval_statements_helper(str: &str, v: Result<Value, EvalError>) {
     use crate::parser::parser_statements;
-    let mut eval = Eval::new();
-    eval.eval_statements(parser_statements(str).unwrap().1);
-    assert_eq!(eval.eval_main(), v)
-}
+    fn test_eval_expr_helper(str: &str, v: Result<Value, EvalError>) {
+        let eval = Eval::new();
+        assert_eq!(eval.eval_expr(parser_expr(str).unwrap().1), v)
+    }
 
-#[test]
-fn test_eval_statements() {
-    test_eval_statements_helper("let main = 4;", Ok(v_int(4)));
-    test_eval_statements_helper("let a = 3; let b = 4; let main = a + b;", Ok(v_int(7)));
-    test_eval_statements_helper("let add(a, b) = a + b; let main = add(2, 3);", Ok(v_int(5)));
-}
+    #[test]
+    fn test_op_expr() {
+        test_eval_expr_helper("3*3+4*4", Ok(v_int(25)));
+        test_eval_expr_helper("4+(6/3)-2", Ok(v_int(4)));
+        test_eval_expr_helper("2+4/2/2", Ok(v_int(3)));
+        test_eval_expr_helper("3>2", Ok(v_bool(true)));
+        test_eval_expr_helper("3<2", Ok(v_bool(false)));
+        test_eval_expr_helper("2>=2", Ok(v_bool(true)));
+        test_eval_expr_helper("2<=3", Ok(v_bool(true)));
+        test_eval_expr_helper("2==3", Ok(v_bool(false)));
+        test_eval_expr_helper("2!=3", Ok(v_bool(true)));
+        test_eval_expr_helper("4%3", Ok(v_int(1)));
+        test_eval_expr_helper("&3", Ok(Value::VRef(Rc::new(RefCell::new(Value::VInt(3))))));
+        test_eval_expr_helper("*(&3)", Ok(Value::VInt(3)));
+    }
 
-#[test]
-fn test_high_order_function() {
-    test_eval_statements_helper(
-        "let double(f, x) = f(f(x)); let succ(n) = n + 1; let main = double(succ, 3);",
-        Ok(v_int(5)),
-    );
-}
+    #[test]
+    fn test_if_expr() {
+        test_eval_expr_helper("if (3>2) 1 else 2", Ok(v_int(1)));
+        test_eval_expr_helper("if (3<2) 1 else 2", Ok(v_int(2)));
+        test_eval_expr_helper("if (3<2) 1 else if (4==4) 2 else 3", Ok(v_int(2)));
+    }
 
-#[test]
-fn test_recursive_function() {
-    test_eval_statements_helper(
-        "let fact(n) = if (n==1) 1 else n * fact(n-1); let main = fact(3);",
-        Ok(v_int(6)),
-    );
-    test_eval_statements_helper(
+    #[test]
+    fn test_string_expr() {
+        test_eval_expr_helper(
+            r#""Hello, world!""#,
+            Ok(Value::VString("Hello, world!".to_owned())),
+        )
+    }
+
+    #[test]
+    fn test_unit_expr() {
+        test_eval_expr_helper("()", Ok(Value::VUnit))
+    }
+
+    #[test]
+    fn test_block_expr() {
+        test_eval_expr_helper("{let x = 1; x + 3;}", Ok(Value::VInt(4)));
+        test_eval_expr_helper("{let x = 1;}", Ok(Value::VUnit));
+    }
+
+    fn test_eval_statements_helper(str: &str, v: Result<Value, EvalError>) {
+        let mut eval = Eval::new();
+        eval.eval_statements(parser_statements(str).unwrap().1)
+            .unwrap();
+        assert_eq!(eval.eval_main(), v)
+    }
+
+    #[test]
+    fn test_eval_statements() {
+        test_eval_statements_helper("let main = 4;", Ok(v_int(4)));
+        test_eval_statements_helper("let a = 3; let b = 4; let main = a + b;", Ok(v_int(7)));
+        test_eval_statements_helper("let add(a, b) = a + b; let main = add(2, 3);", Ok(v_int(5)));
+    }
+
+    #[test]
+    fn test_high_order_function() {
+        test_eval_statements_helper(
+            "let double(f, x) = f(f(x)); let succ(n) = n + 1; let main = double(succ, 3);",
+            Ok(v_int(5)),
+        );
+    }
+
+    #[test]
+    fn test_recursive_function() {
+        test_eval_statements_helper(
+            "let fact(n) = if (n==1) 1 else n * fact(n-1); let main = fact(3);",
+            Ok(v_int(6)),
+        );
+        test_eval_statements_helper(
         "let fib(n) = if (n==1) 1 else if (n==2) 1 else fib(n-1) + fib(n-2); let main = fib(5);",
         Ok(v_int(5)),
     );
-}
+    }
 
-#[test]
-fn test_vector() {
-    test_eval_expr_helper("[1, 2]", Ok(Value::VVector(vec![v_int(1), v_int(2)])))
-}
+    #[test]
+    fn test_vector() {
+        test_eval_expr_helper("[1, 2]", Ok(Value::VVector(vec![v_int(1), v_int(2)])))
+    }
 
-#[test]
-fn test_ref() {
-    test_eval_statements_helper(
-        "let sum(vec) = {
+    #[test]
+    fn test_ref() {
+        test_eval_statements_helper(
+            "let sum(vec) = {
   let sum = &0;
   for (v in vec) {
     sum := *sum + v;
@@ -448,22 +452,22 @@ fn test_ref() {
   *sum;
 };
 let main = sum([1..=100]);",
-        Ok(Value::VInt(5050)),
-    )
-}
+            Ok(Value::VInt(5050)),
+        )
+    }
 
-#[test]
-fn test_enum() {
-    test_eval_statements_helper(
-        "enum Hoge{Foo(Int)}; let main = Foo(3);",
-        Ok(Value::VConstructor("Foo".to_owned(), vec![Value::VInt(3)])),
-    )
-}
+    #[test]
+    fn test_enum() {
+        test_eval_statements_helper(
+            "enum Hoge{Foo(Int)}; let main = Foo(3);",
+            Ok(Value::VConstructor("Foo".to_owned(), vec![Value::VInt(3)])),
+        )
+    }
 
-#[test]
-fn test_match_expr() {
-    test_eval_statements_helper(
-        "
+    #[test]
+    fn test_match_expr() {
+        test_eval_statements_helper(
+            "
 enum OptionInt {
     Some(Int),
     None
@@ -473,6 +477,7 @@ let main = Some(3) match {
     None => 0
 };
         ",
-        Ok(Value::VInt(3)),
-    )
+            Ok(Value::VInt(3)),
+        )
+    }
 }
