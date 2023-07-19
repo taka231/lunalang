@@ -1,7 +1,7 @@
 use crate::{
     ast::{
-        self, e_bin_op, e_fun, e_fun_app, e_if, e_int, e_string, e_var, ConstructorDef, Expr,
-        Pattern, Statement, StatementOrExpr, Statements,
+        e_bin_op, e_fun_app, e_if, e_var, ConstructorDef, Expr, Pattern, Statement,
+        StatementOrExpr, Statements,
     },
     typeinfer::Type,
 };
@@ -9,19 +9,15 @@ use nom::{
     branch::alt,
     bytes::complete::tag,
     character::{
-        complete::{
-            alphanumeric0, digit1, multispace0, multispace1, none_of, one_of, satisfy, space0,
-        },
+        complete::{digit1, multispace0, multispace1, none_of, one_of, satisfy, space0},
         is_alphanumeric,
     },
-    combinator::{eof, fail, map_res, opt, value},
+    combinator::{eof, map_res, opt},
     error::ParseError,
-    multi::{many0, many1, separated_list0, separated_list1},
+    multi::{many0, many1, separated_list0},
     sequence::delimited,
     IResult,
 };
-use once_cell::sync::Lazy;
-use std::collections::{HashMap, HashSet};
 
 /// A combinator that takes a parser `inner` and produces a parser that also consumes both leading and
 /// trailing whitespace, returning the output of `inner`.
@@ -544,6 +540,8 @@ pub fn parser_constructor_pattern(input: &str) -> IResult<&str, Pattern> {
 
 #[cfg(test)]
 mod tests {
+    use crate::ast::{e_fun, e_int, e_string};
+
     use super::*;
     #[test]
     fn test_unary_expr() {
