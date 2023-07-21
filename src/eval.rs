@@ -19,14 +19,6 @@ pub enum Value {
 
 type BuiltinFn = fn(Vec<Value>, Eval) -> Result<Value, EvalError>;
 
-fn v_int(n: i64) -> Value {
-    Value::VInt(n)
-}
-
-fn v_bool(b: bool) -> Value {
-    Value::VBool(b)
-}
-
 #[derive(Eq, PartialEq, Debug, Clone)]
 pub struct Environment {
     env: HashMap<String, Value>,
@@ -160,17 +152,17 @@ impl Eval {
                 let v2 = self.eval_expr(*e2)?;
                 match (v1, v2) {
                     (Value::VInt(n1), Value::VInt(n2)) => match &op as &str {
-                        "+" => Ok(v_int(n1 + n2)),
-                        "-" => Ok(v_int(n1 - n2)),
-                        "*" => Ok(v_int(n1 * n2)),
-                        "/" => Ok(v_int(n1 / n2)),
-                        "%" => Ok(v_int(n1 % n2)),
-                        "<" => Ok(v_bool(n1 < n2)),
-                        ">" => Ok(v_bool(n1 > n2)),
-                        "<=" => Ok(v_bool(n1 <= n2)),
-                        ">=" => Ok(v_bool(n1 >= n2)),
-                        "==" => Ok(v_bool(n1 == n2)),
-                        "!=" => Ok(v_bool(n1 != n2)),
+                        "+" => Ok(Value::VInt(n1 + n2)),
+                        "-" => Ok(Value::VInt(n1 - n2)),
+                        "*" => Ok(Value::VInt(n1 * n2)),
+                        "/" => Ok(Value::VInt(n1 / n2)),
+                        "%" => Ok(Value::VInt(n1 % n2)),
+                        "<" => Ok(Value::VBool(n1 < n2)),
+                        ">" => Ok(Value::VBool(n1 > n2)),
+                        "<=" => Ok(Value::VBool(n1 <= n2)),
+                        ">=" => Ok(Value::VBool(n1 >= n2)),
+                        "==" => Ok(Value::VBool(n1 == n2)),
+                        "!=" => Ok(Value::VBool(n1 != n2)),
                         _ => Err(EvalError::UnimplementedOperatorError(op)),
                     },
                     (Value::VRef(v1), v2) => match &op as &str {
@@ -183,7 +175,7 @@ impl Eval {
                     (_, _) => Err(EvalError::InternalTypeError),
                 }
             }
-            Expr::EInt(n) => Ok(v_int(n)),
+            Expr::EInt(n) => Ok(Value::VInt(n)),
             Expr::EIf(cond, e1, e2) => {
                 let cond = self.eval_expr(*cond)?;
                 match cond {
@@ -362,25 +354,25 @@ mod tests {
 
     #[test]
     fn test_op_expr() {
-        test_eval_expr_helper("3*3+4*4", Ok(v_int(25)));
-        test_eval_expr_helper("4+(6/3)-2", Ok(v_int(4)));
-        test_eval_expr_helper("2+4/2/2", Ok(v_int(3)));
-        test_eval_expr_helper("3>2", Ok(v_bool(true)));
-        test_eval_expr_helper("3<2", Ok(v_bool(false)));
-        test_eval_expr_helper("2>=2", Ok(v_bool(true)));
-        test_eval_expr_helper("2<=3", Ok(v_bool(true)));
-        test_eval_expr_helper("2==3", Ok(v_bool(false)));
-        test_eval_expr_helper("2!=3", Ok(v_bool(true)));
-        test_eval_expr_helper("4%3", Ok(v_int(1)));
+        test_eval_expr_helper("3*3+4*4", Ok(Value::VInt(25)));
+        test_eval_expr_helper("4+(6/3)-2", Ok(Value::VInt(4)));
+        test_eval_expr_helper("2+4/2/2", Ok(Value::VInt(3)));
+        test_eval_expr_helper("3>2", Ok(Value::VBool(true)));
+        test_eval_expr_helper("3<2", Ok(Value::VBool(false)));
+        test_eval_expr_helper("2>=2", Ok(Value::VBool(true)));
+        test_eval_expr_helper("2<=3", Ok(Value::VBool(true)));
+        test_eval_expr_helper("2==3", Ok(Value::VBool(false)));
+        test_eval_expr_helper("2!=3", Ok(Value::VBool(true)));
+        test_eval_expr_helper("4%3", Ok(Value::VInt(1)));
         test_eval_expr_helper("&3", Ok(Value::VRef(Rc::new(RefCell::new(Value::VInt(3))))));
         test_eval_expr_helper("*(&3)", Ok(Value::VInt(3)));
     }
 
     #[test]
     fn test_if_expr() {
-        test_eval_expr_helper("if (3>2) 1 else 2", Ok(v_int(1)));
-        test_eval_expr_helper("if (3<2) 1 else 2", Ok(v_int(2)));
-        test_eval_expr_helper("if (3<2) 1 else if (4==4) 2 else 3", Ok(v_int(2)));
+        test_eval_expr_helper("if (3>2) 1 else 2", Ok(Value::VInt(1)));
+        test_eval_expr_helper("if (3<2) 1 else 2", Ok(Value::VInt(2)));
+        test_eval_expr_helper("if (3<2) 1 else if (4==4) 2 else 3", Ok(Value::VInt(2)));
     }
 
     #[test]
@@ -411,16 +403,22 @@ mod tests {
 
     #[test]
     fn test_eval_statements() {
-        test_eval_statements_helper("let main = 4;", Ok(v_int(4)));
-        test_eval_statements_helper("let a = 3; let b = 4; let main = a + b;", Ok(v_int(7)));
-        test_eval_statements_helper("let add(a, b) = a + b; let main = add(2, 3);", Ok(v_int(5)));
+        test_eval_statements_helper("let main = 4;", Ok(Value::VInt(4)));
+        test_eval_statements_helper(
+            "let a = 3; let b = 4; let main = a + b;",
+            Ok(Value::VInt(7)),
+        );
+        test_eval_statements_helper(
+            "let add(a, b) = a + b; let main = add(2, 3);",
+            Ok(Value::VInt(5)),
+        );
     }
 
     #[test]
     fn test_high_order_function() {
         test_eval_statements_helper(
             "let double(f, x) = f(f(x)); let succ(n) = n + 1; let main = double(succ, 3);",
-            Ok(v_int(5)),
+            Ok(Value::VInt(5)),
         );
     }
 
@@ -428,17 +426,20 @@ mod tests {
     fn test_recursive_function() {
         test_eval_statements_helper(
             "let fact(n) = if (n==1) 1 else n * fact(n-1); let main = fact(3);",
-            Ok(v_int(6)),
+            Ok(Value::VInt(6)),
         );
         test_eval_statements_helper(
         "let fib(n) = if (n==1) 1 else if (n==2) 1 else fib(n-1) + fib(n-2); let main = fib(5);",
-        Ok(v_int(5)),
+        Ok(Value::VInt(5)),
     );
     }
 
     #[test]
     fn test_vector() {
-        test_eval_expr_helper("[1, 2]", Ok(Value::VVector(vec![v_int(1), v_int(2)])))
+        test_eval_expr_helper(
+            "[1, 2]",
+            Ok(Value::VVector(vec![Value::VInt(1), Value::VInt(2)])),
+        )
     }
 
     #[test]
