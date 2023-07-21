@@ -38,7 +38,7 @@ impl Type {
         fn go(t: &Type, ty: &Type) -> Type {
             match t {
                 Type::TType(name) => Type::TType(name.clone()),
-                Type::TFun(t1, t2) => t_fun(go(&*t1, ty), go(&*t2, ty)),
+                Type::TFun(t1, t2) => Type::fun(go(&*t1, ty), go(&*t2, ty)),
                 Type::TVar(n, level, r) => Type::TVar(*n, Rc::clone(level), Rc::clone(r)),
                 Type::TQVar(n) => Type::TQVar(*n),
                 Type::TRecVar(_) => ty.clone(),
@@ -82,10 +82,10 @@ impl Type {
             t => t.clone(),
         }
     }
-}
 
-fn t_fun(t1: Type, t2: Type) -> Type {
-    Type::TFun(Box::new(t1), Box::new(t2))
+    fn fun(t1: Type, t2: Type) -> Type {
+        Type::TFun(Box::new(t1), Box::new(t2))
+    }
 }
 
 impl Type {
@@ -95,7 +95,7 @@ impl Type {
                 Some(ty) => ty.simplify(),
                 None => t.clone(),
             },
-            Type::TFun(t1, t2) => t_fun(t1.simplify(), t2.simplify()),
+            Type::TFun(t1, t2) => Type::fun(t1.simplify(), t2.simplify()),
             Type::TQVar(n) => Type::TQVar(*n),
             Type::TVector(ty) => Type::TVector(Box::new(ty.simplify())),
             Type::TRef(ty) => Type::TRef(Box::new(ty.simplify())),
@@ -177,24 +177,24 @@ impl TypeEnv {
         let mut builtin = HashMap::new();
         builtin.insert(
             "puts".to_owned(),
-            t_fun(Type::ttype("String"), Type::ttype("()")),
+            Type::fun(Type::ttype("String"), Type::ttype("()")),
         );
         builtin.insert(
             "foreach".to_owned(),
-            t_fun(
-                t_fun(Type::TQVar(0), Type::ttype("()")),
-                t_fun(Type::TVector(Box::new(Type::TQVar(0))), Type::ttype("()")),
+            Type::fun(
+                Type::fun(Type::TQVar(0), Type::ttype("()")),
+                Type::fun(Type::TVector(Box::new(Type::TQVar(0))), Type::ttype("()")),
             ),
         );
         builtin.insert(
             "int_to_string".to_owned(),
-            t_fun(Type::ttype("Int"), Type::ttype("String")),
+            Type::fun(Type::ttype("Int"), Type::ttype("String")),
         );
         builtin.insert(
             "enum_from_until".to_owned(),
-            t_fun(
+            Type::fun(
                 Type::ttype("Int"),
-                t_fun(
+                Type::fun(
                     Type::ttype("Int"),
                     Type::TVector(Box::new(Type::ttype("Int"))),
                 ),
@@ -202,9 +202,9 @@ impl TypeEnv {
         );
         builtin.insert(
             "enum_from_to".to_owned(),
-            t_fun(
+            Type::fun(
                 Type::ttype("Int"),
-                t_fun(
+                Type::fun(
                     Type::ttype("Int"),
                     Type::TVector(Box::new(Type::ttype("Int"))),
                 ),
@@ -377,13 +377,13 @@ impl TypeInfer {
                     .insert(arg.to_string(), ty.clone());
                 let result_ty = typeinfer.typeinfer_expr(e)?;
                 self.unassigned_num = typeinfer.unassigned_num;
-                Ok(t_fun(ty, result_ty))
+                Ok(Type::fun(ty, result_ty))
             }
             Expr::EFunApp(e1, e2) => {
                 let t1 = self.typeinfer_expr(e1)?;
                 let t2 = self.typeinfer_expr(e2)?;
                 let t3 = self.newTVar();
-                unify(&t1, &t_fun(t2, t3.clone()))?;
+                unify(&t1, &Type::fun(t2, t3.clone()))?;
                 Ok(t3)
             }
             Expr::EString(_) => Ok(Type::ttype("String")),
@@ -562,7 +562,7 @@ impl TypeInfer {
                         args.iter()
                             .rev()
                             .try_fold(variant_type.clone(), |acm, ty| {
-                                Ok(t_fun(
+                                Ok(Type::fun(
                                     self.replace_type(ty, |name| {
                                         self.type_to_type_env.borrow().get(&name)
                                     })?,
@@ -583,7 +583,7 @@ impl TypeInfer {
     ) -> Result<Type, TypeInferError> {
         match ty.simplify() {
             Type::TType(name) => replace_fn(&name),
-            Type::TFun(t1, t2) => Ok(t_fun(
+            Type::TFun(t1, t2) => Ok(Type::fun(
                 self.replace_type(&t1, replace_fn.clone())?,
                 self.replace_type(&t2, replace_fn)?,
             )),
@@ -628,7 +628,7 @@ impl TypeInfer {
                         ty
                     }
                 },
-                Type::TFun(t1, t2) => t_fun(go(*t1, map, self_), go(*t2, map, self_)),
+                Type::TFun(t1, t2) => Type::fun(go(*t1, map, self_), go(*t2, map, self_)),
                 t @ Type::TVar(_, _, _) => t,
                 Type::TVector(ty) => Type::TVector(Box::new(go(*ty, map, self_))),
                 Type::TRef(ty) => Type::TRef(Box::new(go(*ty, map, self_))),
@@ -845,7 +845,7 @@ mod tests {
     #[case(
         "let add(a, b) = a + b;",
         "add",
-        Ok(t_fun(Type::ttype("Int"), t_fun(Type::ttype("Int"), Type::ttype("Int"))))
+        Ok(Type::fun(Type::ttype("Int"), Type::fun(Type::ttype("Int"), Type::ttype("Int"))))
     )]
     #[case(
         "let add(a, b) = a + b; let a = add(2, 3);",
@@ -856,7 +856,7 @@ mod tests {
     #[case(
         "let id(x) = x; let a = id(2);",
         "id",
-        Ok(t_fun(Type::TQVar(1), Type::TQVar(1)))
+        Ok(Type::fun(Type::TQVar(1), Type::TQVar(1)))
     )]
     fn test_typeinfer_fun(
         #[case] str: &str,
@@ -871,7 +871,7 @@ mod tests {
         typeinfer_statements_test_helper(
             "enum Hoge {Foo(Int)};",
             "Foo",
-            Ok(t_fun(
+            Ok(Type::fun(
                 Type::ttype("Int"),
                 Type::TVariant(vec![("Foo".to_owned(), vec![Type::ttype("Int")])]),
             )),
@@ -879,7 +879,7 @@ mod tests {
         typeinfer_statements_test_helper(
             "enum Hoge {Foo(Int)}; let main = Foo;",
             "main",
-            Ok(t_fun(
+            Ok(Type::fun(
                 Type::ttype("Int"),
                 Type::TVariant(vec![("Foo".to_owned(), vec![Type::ttype("Int")])]),
             )),
@@ -899,9 +899,9 @@ mod tests {
         typeinfer_statements_test_helper(
             "enum List {Cons(Int, List), Nil};",
             "Cons",
-            Ok(t_fun(
+            Ok(Type::fun(
                 Type::ttype("Int"),
-                t_fun(
+                Type::fun(
                     Type::TRec(Box::new(Type::TVariant(vec![
                         (
                             "Cons".to_owned(),
@@ -922,7 +922,7 @@ mod tests {
         typeinfer_statements_test_helper(
             "enum Hoge {Foo(Int)}; enum Huga {Bar(Hoge)};",
             "Bar",
-            Ok(t_fun(
+            Ok(Type::fun(
                 Type::TVariant(vec![("Foo".to_owned(), vec![Type::ttype("Int")])]),
                 Type::TVariant(vec![(
                     "Bar".to_owned(),
@@ -936,14 +936,14 @@ mod tests {
         typeinfer_statements_test_helper(
             "enum Hoge {Foo(Int)}; enum Huga {Bar(Hoge -> Int)};",
             "Bar",
-            Ok(t_fun(
-                t_fun(
+            Ok(Type::fun(
+                Type::fun(
                     Type::TVariant(vec![("Foo".to_owned(), vec![Type::ttype("Int")])]),
                     Type::ttype("Int"),
                 ),
                 Type::TVariant(vec![(
                     "Bar".to_owned(),
-                    vec![t_fun(
+                    vec![Type::fun(
                         Type::TVariant(vec![("Foo".to_owned(), vec![Type::ttype("Int")])]),
                         Type::ttype("Int"),
                     )],
