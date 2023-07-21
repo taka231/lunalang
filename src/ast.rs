@@ -23,32 +23,30 @@ pub enum Pattern {
     PVar(String),
 }
 
-pub fn e_int(n: i64) -> Expr {
-    Expr::EInt(n)
-}
+impl Expr {
+    pub fn bin_op(op: &str, e1: Expr, e2: Expr) -> Expr {
+        Expr::EBinOp(op.to_string(), Box::new(e1), Box::new(e2))
+    }
 
-pub fn e_bin_op(str: &str, e1: Expr, e2: Expr) -> Expr {
-    Expr::EBinOp(str.to_string(), Box::new(e1), Box::new(e2))
-}
+    pub fn e_if(cond: Expr, e1: Expr, e2: Expr) -> Expr {
+        Expr::EIf(Box::new(cond), Box::new(e1), Box::new(e2))
+    }
 
-pub fn e_if(cond: Expr, e1: Expr, e2: Expr) -> Expr {
-    Expr::EIf(Box::new(cond), Box::new(e1), Box::new(e2))
-}
+    pub fn var(str: &str) -> Expr {
+        Expr::EVar(str.to_string())
+    }
 
-pub fn e_var(str: &str) -> Expr {
-    Expr::EVar(str.to_string())
-}
+    pub fn fun(str: &str, e: Expr) -> Expr {
+        Expr::EFun(str.to_string(), Box::new(e))
+    }
 
-pub fn e_fun(str: &str, e: Expr) -> Expr {
-    Expr::EFun(str.to_string(), Box::new(e))
-}
+    pub fn fun_app(e1: Expr, e2: Expr) -> Expr {
+        Expr::EFunApp(Box::new(e1), Box::new(e2))
+    }
 
-pub fn e_fun_app(e1: Expr, e2: Expr) -> Expr {
-    Expr::EFunApp(Box::new(e1), Box::new(e2))
-}
-
-pub fn e_string(str: &str) -> Expr {
-    Expr::EString(str.to_owned())
+    pub fn string(str: &str) -> Expr {
+        Expr::EString(str.to_string())
+    }
 }
 
 #[derive(PartialEq, Eq, Debug, Clone)]

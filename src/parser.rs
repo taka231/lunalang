@@ -1,8 +1,5 @@
 use crate::{
-    ast::{
-        e_bin_op, e_fun_app, e_if, e_var, ConstructorDef, Expr, Pattern, Statement,
-        StatementOrExpr, Statements,
-    },
+    ast::{ConstructorDef, Expr, Pattern, Statement, StatementOrExpr, Statements},
     typeinfer::Type,
 };
 use nom::{
@@ -113,7 +110,7 @@ pub fn expr_op_7l(input: &str) -> IResult<&str, Expr> {
     Ok((
         input,
         e2.iter()
-            .fold(e1, |acc, (op, ex)| e_bin_op(&op, acc, ex.clone())),
+            .fold(e1, |acc, (op, ex)| Expr::bin_op(&op, acc, ex.clone())),
     ))
 }
 
@@ -127,7 +124,7 @@ pub fn expr_op_6l(input: &str) -> IResult<&str, Expr> {
     Ok((
         input,
         e2.iter()
-            .fold(e1, |acc, (op, ex)| e_bin_op(&op, acc, ex.clone())),
+            .fold(e1, |acc, (op, ex)| Expr::bin_op(&op, acc, ex.clone())),
     ))
 }
 
@@ -146,7 +143,7 @@ pub fn expr_op_4n(input: &str) -> IResult<&str, Expr> {
         Ok((input, (op, e2)))
     })(input)?;
     match optional {
-        Some((op, e2)) => Ok((input, e_bin_op(op, e1, e2))),
+        Some((op, e2)) => Ok((input, Expr::bin_op(op, e1, e2))),
         None => Ok((input, e1)),
     }
 }
@@ -159,7 +156,7 @@ pub fn expr_op_0n(input: &str) -> IResult<&str, Expr> {
         Ok((input, (op, e2)))
     })(input)?;
     match optional {
-        Some((op, e2)) => Ok((input, e_bin_op(op, e1, e2))),
+        Some((op, e2)) => Ok((input, Expr::bin_op(op, e1, e2))),
         None => Ok((input, e1)),
     }
 }
@@ -190,7 +187,7 @@ pub fn expr_if(input: &str) -> IResult<&str, Expr> {
     let (input, e1) = parser_expr(input)?;
     let (input, _) = symbol("else")(input)?;
     let (input, e2) = parser_expr(input)?;
-    Ok((input, e_if(cond, e1, e2)))
+    Ok((input, Expr::e_if(cond, e1, e2)))
 }
 
 pub fn fun_app(input: &str) -> IResult<&str, Expr> {
@@ -206,7 +203,7 @@ pub fn fun_app(input: &str) -> IResult<&str, Expr> {
         Some(args) => Ok((
             input,
             args.iter()
-                .fold(e, |acc, expr| e_fun_app(acc, expr.clone())),
+                .fold(e, |acc, expr| Expr::fun_app(acc, expr.clone())),
         )),
     }
 }
@@ -415,7 +412,7 @@ pub fn dot_expr(input: &str) -> IResult<&str, Expr> {
         let args = args.unwrap_or(vec![]);
         let mut temp_expr = Expr::EVar(ident);
         for arg in args {
-            temp_expr = e_fun_app(temp_expr, arg);
+            temp_expr = Expr::fun_app(temp_expr, arg);
         }
         Ok((input, temp_expr))
     })(input)?;
@@ -424,14 +421,14 @@ pub fn dot_expr(input: &str) -> IResult<&str, Expr> {
         None => (),
         Some(e) => {
             if temp_exprs.len() == 0 {
-                return Ok((input, e_fun_app(expr, e)));
+                return Ok((input, Expr::fun_app(expr, e)));
             }
             let len = temp_exprs.len();
-            temp_exprs[len - 1] = e_fun_app(temp_exprs[len - 1].clone(), e)
+            temp_exprs[len - 1] = Expr::fun_app(temp_exprs[len - 1].clone(), e)
         }
     }
     for temp_expr in temp_exprs {
-        expr = e_fun_app(temp_expr, expr)
+        expr = Expr::fun_app(temp_expr, expr)
     }
     Ok((input, expr))
 }
@@ -482,8 +479,8 @@ pub fn for_in_expr(input: &str) -> IResult<&str, Expr> {
     let (input, expr) = parser_expr(input)?;
     Ok((
         input,
-        e_fun_app(
-            e_fun_app(e_var("foreach"), Expr::EFun(ident, Box::new(expr))),
+        Expr::fun_app(
+            Expr::fun_app(Expr::var("foreach"), Expr::EFun(ident, Box::new(expr))),
             vec,
         ),
     ))
@@ -498,9 +495,12 @@ pub fn enum_vec_expr(input: &str) -> IResult<&str, Expr> {
     match op {
         "..=" => Ok((
             input,
-            e_fun_app(e_fun_app(e_var("enum_from_until"), e1), e2),
+            Expr::fun_app(Expr::fun_app(Expr::var("enum_from_until"), e1), e2),
         )),
-        ".." => Ok((input, e_fun_app(e_fun_app(e_var("enum_from_to"), e1), e2))),
+        ".." => Ok((
+            input,
+            Expr::fun_app(Expr::fun_app(Expr::var("enum_from_to"), e1), e2),
+        )),
         _ => panic!("internal error"),
     }
 }
@@ -540,8 +540,6 @@ pub fn parser_constructor_pattern(input: &str) -> IResult<&str, Pattern> {
 
 #[cfg(test)]
 mod tests {
-    use crate::ast::{e_fun, e_int, e_string};
-
     use super::*;
     #[test]
     fn test_unary_expr() {
@@ -561,7 +559,7 @@ mod tests {
             parser_expr("-3+3"),
             Ok((
                 "",
-                e_bin_op(
+                Expr::bin_op(
                     "+",
                     Expr::EUnary("-".to_owned(), Box::new(Expr::EInt(3))),
                     Expr::EInt(3)
@@ -574,52 +572,70 @@ mod tests {
     fn test_op_expr() {
         assert_eq!(
             parser_expr("1 + 1"),
-            Ok(("", e_bin_op("+", e_int(1), e_int(1))))
+            Ok(("", Expr::bin_op("+", Expr::EInt(1), Expr::EInt(1))))
         );
         assert_eq!(
             parser_expr("1 + 1 * 1"),
             Ok((
                 "",
-                e_bin_op("+", e_int(1), e_bin_op("*", e_int(1), e_int(1)))
+                Expr::bin_op(
+                    "+",
+                    Expr::EInt(1),
+                    Expr::bin_op("*", Expr::EInt(1), Expr::EInt(1))
+                )
             ))
         );
         assert_eq!(
             parser_expr("1 + (2 * 3)"),
             Ok((
                 "",
-                e_bin_op("+", e_int(1), e_bin_op("*", e_int(2), e_int(3)))
+                Expr::bin_op(
+                    "+",
+                    Expr::EInt(1),
+                    Expr::bin_op("*", Expr::EInt(2), Expr::EInt(3))
+                )
             ))
         );
         assert_eq!(
             parser_expr("1<2"),
-            Ok(("", e_bin_op("<", e_int(1), e_int(2))))
+            Ok(("", Expr::bin_op("<", Expr::EInt(1), Expr::EInt(2))))
         );
         assert_eq!(
             parser_expr("1%2"),
-            Ok(("", e_bin_op("%", e_int(1), e_int(2))))
+            Ok(("", Expr::bin_op("%", Expr::EInt(1), Expr::EInt(2))))
         );
         assert_eq!(
             parser_expr("1<1+1"),
             Ok((
                 "",
-                e_bin_op("<", e_int(1), e_bin_op("+", e_int(1), e_int(1)))
+                Expr::bin_op(
+                    "<",
+                    Expr::EInt(1),
+                    Expr::bin_op("+", Expr::EInt(1), Expr::EInt(1))
+                )
             ))
         );
         assert_eq!(
             parser_expr("a:=3"),
-            Ok(("", e_bin_op(":=", e_var("a"), e_int(3))))
+            Ok(("", Expr::bin_op(":=", Expr::var("a"), Expr::EInt(3))))
         );
         assert_eq!(
             parser_expr("a+b"),
-            Ok(("", e_bin_op("+", e_var("a"), e_var("b"))))
+            Ok(("", Expr::bin_op("+", Expr::var("a"), Expr::var("b"))))
         );
         assert_eq!(
             parser_expr("a + b"),
-            Ok(("", e_bin_op("+", e_var("a"), e_var("b"))))
+            Ok(("", Expr::bin_op("+", Expr::var("a"), Expr::var("b"))))
         );
         assert_eq!(
             parser_expr("add(2, 3)"),
-            Ok(("", e_fun_app(e_fun_app(e_var("add"), e_int(2)), e_int(3)))),
+            Ok((
+                "",
+                Expr::fun_app(
+                    Expr::fun_app(Expr::var("add"), Expr::EInt(2)),
+                    Expr::EInt(3)
+                )
+            )),
         )
     }
 
@@ -627,10 +643,10 @@ mod tests {
     fn test_string_expr() {
         assert_eq!(
             parser_expr(r#""Hello, world!""#),
-            Ok(("", e_string("Hello, world!")))
+            Ok(("", Expr::string("Hello, world!")))
         );
-        assert_eq!(parser_expr(r#""""#), Ok(("", e_string(""))));
-        assert_eq!(expr_string(r#"" ""#), Ok(("", e_string(" "))));
+        assert_eq!(parser_expr(r#""""#), Ok(("", Expr::string(""))));
+        assert_eq!(expr_string(r#"" ""#), Ok(("", Expr::string(" "))));
     }
 
     #[test]
@@ -644,7 +660,11 @@ mod tests {
             parser_expr("if (1<2) 1 else 2"),
             Ok((
                 "",
-                e_if(e_bin_op("<", e_int(1), e_int(2)), e_int(1), e_int(2))
+                Expr::e_if(
+                    Expr::bin_op("<", Expr::EInt(1), Expr::EInt(2)),
+                    Expr::EInt(1),
+                    Expr::EInt(2)
+                )
             ))
         );
     }
@@ -653,18 +673,24 @@ mod tests {
     fn test_fun_app() {
         assert_eq!(
             parser_expr("add(2, 3)"),
-            Ok(("", e_fun_app(e_fun_app(e_var("add"), e_int(2)), e_int(3)))),
+            Ok((
+                "",
+                Expr::fun_app(
+                    Expr::fun_app(Expr::var("add"), Expr::EInt(2)),
+                    Expr::EInt(3)
+                )
+            )),
         );
         assert_eq!(
             dot_expr("{add;}(2, 3)"),
             Ok((
                 "",
-                e_fun_app(
-                    e_fun_app(
-                        Expr::EBlockExpr(vec![StatementOrExpr::Expr(e_var("add"))]),
-                        e_int(2)
+                Expr::fun_app(
+                    Expr::fun_app(
+                        Expr::EBlockExpr(vec![StatementOrExpr::Expr(Expr::var("add"))]),
+                        Expr::EInt(2)
                     ),
-                    e_int(3)
+                    Expr::EInt(3)
                 )
             )),
         );
@@ -672,9 +698,9 @@ mod tests {
             dot_expr("add(2) {3;}"),
             Ok((
                 "",
-                e_fun_app(
-                    e_fun_app(e_var("add"), e_int(2)),
-                    Expr::EBlockExpr(vec![StatementOrExpr::Expr(e_int(3))])
+                Expr::fun_app(
+                    Expr::fun_app(Expr::var("add"), Expr::EInt(2)),
+                    Expr::EBlockExpr(vec![StatementOrExpr::Expr(Expr::EInt(3))])
                 )
             )),
         );
@@ -724,7 +750,7 @@ mod tests {
                 "",
                 Expr::EBlockExpr(vec![
                     StatementOrExpr::Statement(Statement::Assign("x".to_owned(), Expr::EInt(1))),
-                    StatementOrExpr::Expr(e_bin_op("+", e_var("x"), e_int(1)))
+                    StatementOrExpr::Expr(Expr::bin_op("+", Expr::var("x"), Expr::EInt(1)))
                 ])
             ))
         );
@@ -739,7 +765,7 @@ mod tests {
                 "",
                 Expr::EBlockExpr(vec![
                     StatementOrExpr::Statement(Statement::Assign("x".to_owned(), Expr::EInt(1))),
-                    StatementOrExpr::Expr(e_bin_op("+", e_var("x"), e_int(1)))
+                    StatementOrExpr::Expr(Expr::bin_op("+", Expr::var("x"), Expr::EInt(1)))
                 ])
             ))
         )
@@ -749,7 +775,7 @@ mod tests {
     fn test_assign_statement() {
         assert_eq!(
             statement_assign("let a = 1;"),
-            Ok(("", Statement::Assign("a".to_string(), e_int(1))))
+            Ok(("", Statement::Assign("a".to_string(), Expr::EInt(1))))
         );
     }
 
@@ -840,7 +866,10 @@ mod tests {
                 "",
                 Statement::Assign(
                     "add".to_string(),
-                    e_fun("a", e_fun("b", e_bin_op("+", e_var("a"), e_var("b"))))
+                    Expr::fun(
+                        "a",
+                        Expr::fun("b", Expr::bin_op("+", Expr::var("a"), Expr::var("b")))
+                    )
                 )
             ))
         )
@@ -861,7 +890,7 @@ mod tests {
     pub fn test_parser_statement() {
         assert_eq!(
             parser_statement("let main = 1;"),
-            Ok(("", Statement::Assign("main".to_string(), e_int(1)))),
+            Ok(("", Statement::Assign("main".to_string(), Expr::EInt(1)))),
         );
         assert_eq!(
             parser_statement("let add(a, b) = a + b;"),
@@ -869,7 +898,10 @@ mod tests {
                 "",
                 Statement::Assign(
                     "add".to_string(),
-                    e_fun("a", e_fun("b", e_bin_op("+", e_var("a"), e_var("b"))))
+                    Expr::fun(
+                        "a",
+                        Expr::fun("b", Expr::bin_op("+", Expr::var("a"), Expr::var("b")))
+                    )
                 )
             ))
         );
@@ -879,7 +911,10 @@ mod tests {
     fn test_parser_statements() {
         assert_eq!(
             parser_statements("let main = 1;"),
-            Ok(("", vec![Statement::Assign("main".to_string(), e_int(1))]))
+            Ok((
+                "",
+                vec![Statement::Assign("main".to_string(), Expr::EInt(1))]
+            ))
         );
         assert_eq!(
             parser_statements("let main = a + b;"),
@@ -887,7 +922,7 @@ mod tests {
                 "",
                 vec![Statement::Assign(
                     "main".to_string(),
-                    e_bin_op("+", e_var("a"), e_var("b"))
+                    Expr::bin_op("+", Expr::var("a"), Expr::var("b"))
                 ),]
             ))
         );
@@ -896,8 +931,8 @@ mod tests {
             Ok((
                 "",
                 vec![
-                    Statement::Assign("a".to_string(), e_int(1)),
-                    Statement::Assign("b".to_string(), e_int(2))
+                    Statement::Assign("a".to_string(), Expr::EInt(1)),
+                    Statement::Assign("b".to_string(), Expr::EInt(2))
                 ]
             ))
         );
@@ -906,9 +941,12 @@ mod tests {
             Ok((
                 "",
                 vec![
-                    Statement::Assign("a".to_string(), e_int(1)),
-                    Statement::Assign("b".to_string(), e_int(2)),
-                    Statement::Assign("main".to_string(), e_bin_op("+", e_var("a"), e_var("b")))
+                    Statement::Assign("a".to_string(), Expr::EInt(1)),
+                    Statement::Assign("b".to_string(), Expr::EInt(2)),
+                    Statement::Assign(
+                        "main".to_string(),
+                        Expr::bin_op("+", Expr::var("a"), Expr::var("b"))
+                    )
                 ]
             ))
         )
@@ -918,26 +956,32 @@ mod tests {
     fn test_dot_expr() {
         assert_eq!(
             dot_expr("3.inc"),
-            Ok(("", e_fun_app(e_var("inc"), Expr::EInt(3))))
+            Ok(("", Expr::fun_app(Expr::var("inc"), Expr::EInt(3))))
         );
         assert_eq!(
             dot_expr("3.inc()"),
-            Ok(("", e_fun_app(e_var("inc"), Expr::EInt(3))))
+            Ok(("", Expr::fun_app(Expr::var("inc"), Expr::EInt(3))))
         );
         assert_eq!(
             dot_expr("3.add(2)"),
             Ok((
                 "",
-                e_fun_app(e_fun_app(e_var("add"), Expr::EInt(2)), Expr::EInt(3))
+                Expr::fun_app(
+                    Expr::fun_app(Expr::var("add"), Expr::EInt(2)),
+                    Expr::EInt(3)
+                )
             ))
         );
         assert_eq!(
             dot_expr("add(2, 3).inc"),
             Ok((
                 "",
-                e_fun_app(
-                    e_var("inc"),
-                    e_fun_app(e_fun_app(e_var("add"), Expr::EInt(2)), Expr::EInt(3))
+                Expr::fun_app(
+                    Expr::var("inc"),
+                    Expr::fun_app(
+                        Expr::fun_app(Expr::var("add"), Expr::EInt(2)),
+                        Expr::EInt(3)
+                    )
                 )
             ))
         );
@@ -945,9 +989,12 @@ mod tests {
             dot_expr("3.add(2).add(4)"),
             Ok((
                 "",
-                e_fun_app(
-                    e_fun_app(e_var("add"), Expr::EInt(4)),
-                    e_fun_app(e_fun_app(e_var("add"), Expr::EInt(2)), Expr::EInt(3))
+                Expr::fun_app(
+                    Expr::fun_app(Expr::var("add"), Expr::EInt(4)),
+                    Expr::fun_app(
+                        Expr::fun_app(Expr::var("add"), Expr::EInt(2)),
+                        Expr::EInt(3)
+                    )
                 )
             ))
         );
@@ -955,9 +1002,9 @@ mod tests {
             dot_expr("3.add {2;}"),
             Ok((
                 "",
-                e_fun_app(
-                    e_fun_app(
-                        e_var("add"),
+                Expr::fun_app(
+                    Expr::fun_app(
+                        Expr::var("add"),
                         Expr::EBlockExpr(vec![StatementOrExpr::Expr(Expr::EInt(2))])
                     ),
                     Expr::EInt(3)
@@ -968,9 +1015,9 @@ mod tests {
             dot_expr("3.add() {2;}"),
             Ok((
                 "",
-                e_fun_app(
-                    e_fun_app(
-                        e_var("add"),
+                Expr::fun_app(
+                    Expr::fun_app(
+                        Expr::var("add"),
                         Expr::EBlockExpr(vec![StatementOrExpr::Expr(Expr::EInt(2))])
                     ),
                     Expr::EInt(3)
@@ -981,7 +1028,10 @@ mod tests {
 
     #[test]
     fn test_lambda_fn() {
-        assert_eq!(lambda_fn("fn x -> x"), Ok(("", e_fun("x", e_var("x")))));
+        assert_eq!(
+            lambda_fn("fn x -> x"),
+            Ok(("", Expr::fun("x", Expr::var("x"))))
+        );
     }
 
     #[test]
@@ -990,11 +1040,11 @@ mod tests {
             lambda_block_fn("{fn x -> x; x;}"),
             Ok((
                 "",
-                e_fun(
+                Expr::fun(
                     "x",
                     Expr::EBlockExpr(vec![
-                        StatementOrExpr::Expr(e_var("x")),
-                        StatementOrExpr::Expr(e_var("x"))
+                        StatementOrExpr::Expr(Expr::var("x")),
+                        StatementOrExpr::Expr(Expr::var("x"))
                     ])
                 )
             ))
@@ -1003,13 +1053,13 @@ mod tests {
             parser_expr("hoge {fn x -> x; x;}"),
             Ok((
                 "",
-                e_fun_app(
-                    e_var("hoge"),
-                    e_fun(
+                Expr::fun_app(
+                    Expr::var("hoge"),
+                    Expr::fun(
                         "x",
                         Expr::EBlockExpr(vec![
-                            StatementOrExpr::Expr(e_var("x")),
-                            StatementOrExpr::Expr(e_var("x"))
+                            StatementOrExpr::Expr(Expr::var("x")),
+                            StatementOrExpr::Expr(Expr::var("x"))
                         ])
                     )
                 )
