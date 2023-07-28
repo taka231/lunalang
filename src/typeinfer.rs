@@ -1,140 +1,11 @@
-use crate::ast::{ConstructorDef, Expr, Pattern, Statement, StatementOrExpr, Statements};
+use crate::ast::{
+    ConstructorDef, Expr_, Pattern, Pattern_, Statement, StatementOrExpr, StatementOrExpr_,
+    Statement_, Statements, UntypedExpr, UntypedPattern, UntypedStatement, UntypedStatements,
+};
 use crate::error::TypeInferError;
+use crate::types::Type;
 use std::collections::HashMap;
 use std::{cell::RefCell, fmt::Display, rc::Rc};
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Type {
-    TType(String),
-    TFun(Box<Type>, Box<Type>),
-    TVar(u64, Rc<RefCell<u64>>, Rc<RefCell<Option<Type>>>),
-    TQVar(u64),
-    TRecVar(u64),
-    TRec(Box<Type>),
-    TVector(Box<Type>),
-    TRef(Box<Type>),
-    TVariant(Vec<(String, Vec<Type>)>),
-}
-
-impl Type {
-    fn ttype(ty: impl Into<String>) -> Type {
-        Type::TType(ty.into())
-    }
-
-    fn variant_to_type(&self, name: &str) -> Result<Vec<Type>, TypeInferError> {
-        match self.simplify() {
-            Type::TVariant(variants) => variants
-                .iter()
-                .find(|(n, _)| n == name)
-                .map(|(_, tys)| tys.clone())
-                .ok_or_else(|| {
-                    TypeInferError::VariantDoesNotHaveConstructor(self.clone(), name.to_owned())
-                }),
-            _ => Err(TypeInferError::ExpectedVariatButGot(self.clone())),
-        }
-    }
-
-    fn unfold(&self, ty: &Type) -> Type {
-        fn go(t: &Type, ty: &Type) -> Type {
-            match t {
-                Type::TType(name) => Type::TType(name.clone()),
-                Type::TFun(t1, t2) => Type::fun(go(&*t1, ty), go(&*t2, ty)),
-                Type::TVar(n, level, r) => Type::TVar(*n, Rc::clone(level), Rc::clone(r)),
-                Type::TQVar(n) => Type::TQVar(*n),
-                Type::TRecVar(_) => ty.clone(),
-                Type::TRec(t) => go(&*t, ty),
-                Type::TVector(t) => Type::TVector(Box::new(go(&*t, ty))),
-                Type::TRef(t) => Type::TRef(Box::new(go(&*t, ty))),
-                Type::TVariant(variants) => Type::TVariant(
-                    variants
-                        .iter()
-                        .map(|(name, tys)| {
-                            (name.to_owned(), tys.iter().map(|t| go(&t, ty)).collect())
-                        })
-                        .collect(),
-                ),
-            }
-        }
-        match self.simplify() {
-            Type::TRec(t) => go(&t, ty),
-            _ => self.clone(),
-        }
-    }
-
-    fn fold_variant(&self) -> Type {
-        match self.simplify() {
-            Type::TVariant(variants) => {
-                for (_, tys) in &variants {
-                    for ty in tys {
-                        match ty {
-                            Type::TRec(_) => {
-                                if self == &ty.unfold(ty) {
-                                    return ty.clone();
-                                }
-                            }
-
-                            _ => {}
-                        }
-                    }
-                }
-                return Type::TVariant(variants);
-            }
-            t => t.clone(),
-        }
-    }
-
-    fn fun(t1: Type, t2: Type) -> Type {
-        Type::TFun(Box::new(t1), Box::new(t2))
-    }
-}
-
-impl Type {
-    fn simplify(&self) -> Self {
-        match self {
-            t @ Type::TVar(n, level, ty) => match &*Rc::clone(ty).borrow() {
-                Some(ty) => ty.simplify(),
-                None => t.clone(),
-            },
-            Type::TFun(t1, t2) => Type::fun(t1.simplify(), t2.simplify()),
-            Type::TQVar(n) => Type::TQVar(*n),
-            Type::TVector(ty) => Type::TVector(Box::new(ty.simplify())),
-            Type::TRef(ty) => Type::TRef(Box::new(ty.simplify())),
-            Type::TType(ty) => Type::TType(ty.to_owned()),
-            Type::TVariant(variants) => Type::TVariant(
-                variants
-                    .iter()
-                    .map(|(name, tys)| {
-                        (
-                            name.to_owned(),
-                            tys.iter().map(|ty| ty.simplify()).collect(),
-                        )
-                    })
-                    .collect(),
-            ),
-            Type::TRecVar(n) => Type::TRecVar(*n),
-            Type::TRec(ty) => Type::TRec(Box::new(ty.simplify())),
-        }
-    }
-
-    fn unwrap_all(t: Rc<RefCell<Option<Type>>>) -> Type {
-        (*t).borrow().as_ref().unwrap().clone()
-    }
-
-    fn separate_to_args_and_resulttype(&self) -> (Vec<Type>, Type) {
-        let mut ty = self.simplify();
-        let mut args = vec![];
-        loop {
-            match ty {
-                Self::TFun(ty1, ty2) => {
-                    args.push(*ty1);
-                    ty = *ty2
-                }
-                _ => break,
-            }
-        }
-        (args, ty)
-    }
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct TypeEnv {
@@ -267,39 +138,6 @@ pub struct TypeInfer {
     level: u64,
 }
 
-impl Display for Type {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self.simplify() {
-            Type::TVar(n, level, _) => write!(f, "_a{}({})", n, level.borrow()),
-            Type::TFun(t1, t2) => write!(f, "({}) -> {}", t1, t2),
-            Type::TQVar(n) => write!(f, "a{}", n),
-            Type::TVector(ty) => write!(f, "Vector[{}]", ty),
-            Type::TRef(ty) => write!(f, "Ref[{}]", ty),
-            Type::TType(ty) => write!(f, "{}", ty),
-            Type::TVariant(variants) => write!(
-                f,
-                "<{}>",
-                variants
-                    .iter()
-                    .map(|(name, tys)| {
-                        format!(
-                            "{}({})",
-                            name,
-                            tys.iter()
-                                .map(|ty| ty.to_string())
-                                .collect::<Vec<String>>()
-                                .join(", ")
-                        )
-                    })
-                    .collect::<Vec<String>>()
-                    .join(" | ")
-            ),
-            Type::TRecVar(n) => write!(f, "_rec{}", n),
-            Type::TRec(ty) => write!(f, "μ({})", ty),
-        }
-    }
-}
-
 impl TypeInfer {
     pub fn new() -> Self {
         TypeInfer {
@@ -331,39 +169,42 @@ impl TypeInfer {
         self.unassigned_num += 1;
         ty
     }
-    pub fn typeinfer_expr(&mut self, ast: &Expr) -> Result<Type, TypeInferError> {
-        match ast {
-            Expr::EInt(_) => Ok(Type::ttype("Int")),
-            Expr::EBinOp(op, e1, e2) => match &op as &str {
+    pub fn typeinfer_expr(&mut self, ast: &UntypedExpr) -> Result<Type, TypeInferError> {
+        match &ast.inner {
+            Expr_::EInt(_) => Ok(Type::ttype("Int")),
+            Expr_::EBinOp(op, e1, e2) => match &op as &str {
                 "+" | "-" | "*" | "/" | "%" => {
-                    unify(&Type::ttype("Int"), &self.typeinfer_expr(e1)?)?;
-                    unify(&Type::ttype("Int"), &self.typeinfer_expr(e2)?)?;
+                    unify(&Type::ttype("Int"), &self.typeinfer_expr(&e1)?)?;
+                    unify(&Type::ttype("Int"), &self.typeinfer_expr(&e2)?)?;
                     Ok(Type::ttype("Int"))
                 }
                 "<" | ">" | "<=" | ">=" | "==" | "!=" => {
-                    unify(&Type::ttype("Int"), &self.typeinfer_expr(e1)?)?;
-                    unify(&Type::ttype("Int"), &self.typeinfer_expr(e2)?)?;
+                    unify(&Type::ttype("Int"), &self.typeinfer_expr(&e1)?)?;
+                    unify(&Type::ttype("Int"), &self.typeinfer_expr(&e2)?)?;
                     Ok(Type::ttype("Bool"))
                 }
                 ":=" => {
                     let ty = self.newTVar();
-                    unify(&Type::TRef(Box::new(ty.clone())), &self.typeinfer_expr(e1)?)?;
-                    unify(&ty, &self.typeinfer_expr(e2)?)?;
+                    unify(
+                        &Type::TRef(Box::new(ty.clone())),
+                        &self.typeinfer_expr(&e1)?,
+                    )?;
+                    unify(&ty, &self.typeinfer_expr(&e2)?)?;
                     Ok(Type::ttype("()"))
                 }
                 _ => Err(TypeInferError::UnimplementedOperatorError(op.clone())),
             },
-            Expr::EIf(cond, e1, e2) => {
-                unify(&Type::ttype("Bool"), &self.typeinfer_expr(cond)?)?;
-                let t = self.typeinfer_expr(e1)?;
-                unify(&t, &self.typeinfer_expr(e2)?)?;
+            Expr_::EIf(cond, e1, e2) => {
+                unify(&Type::ttype("Bool"), &self.typeinfer_expr(&cond)?)?;
+                let t = self.typeinfer_expr(&e1)?;
+                unify(&t, &self.typeinfer_expr(&e2)?)?;
                 Ok(t)
             }
-            Expr::EVar(ident) => {
-                let ty = self.env.borrow().get(ident)?;
+            Expr_::EVar(ident) => {
+                let ty = self.env.borrow().get(&ident)?;
                 Ok(self.instantiate(&ty))
             }
-            Expr::EFun(arg, e) => {
+            Expr_::EFun(arg, e) => {
                 let mut typeinfer = TypeInfer::from(
                     TypeEnv::new_enclosed_env(Rc::clone(&self.env)),
                     TypeToTypeEnv::new_enclosed_env(Rc::clone(&self.type_to_type_env)),
@@ -375,20 +216,20 @@ impl TypeInfer {
                     .env
                     .borrow_mut()
                     .insert(arg.to_string(), ty.clone());
-                let result_ty = typeinfer.typeinfer_expr(e)?;
+                let result_ty = typeinfer.typeinfer_expr(&e)?;
                 self.unassigned_num = typeinfer.unassigned_num;
                 Ok(Type::fun(ty, result_ty))
             }
-            Expr::EFunApp(e1, e2) => {
-                let t1 = self.typeinfer_expr(e1)?;
-                let t2 = self.typeinfer_expr(e2)?;
+            Expr_::EFunApp(e1, e2) => {
+                let t1 = self.typeinfer_expr(&e1)?;
+                let t2 = self.typeinfer_expr(&e2)?;
                 let t3 = self.newTVar();
                 unify(&t1, &Type::fun(t2, t3.clone()))?;
                 Ok(t3)
             }
-            Expr::EString(_) => Ok(Type::ttype("String")),
-            Expr::EUnit => Ok(Type::ttype("()")),
-            Expr::EBlockExpr(asts) => {
+            Expr_::EString(_) => Ok(Type::ttype("String")),
+            Expr_::EUnit => Ok(Type::ttype("()")),
+            Expr_::EBlockExpr(asts) => {
                 let mut typeinfer = TypeInfer::from(
                     TypeEnv::new_enclosed_env(Rc::clone(&self.env)),
                     TypeToTypeEnv::new_enclosed_env(Rc::clone(&self.type_to_type_env)),
@@ -397,19 +238,19 @@ impl TypeInfer {
                 );
                 if asts.len() > 1 {
                     for i in 0..(asts.len() - 1) {
-                        match &asts[i] {
-                            StatementOrExpr::Expr(e) => {
+                        match &asts[i].inner {
+                            StatementOrExpr_::Expr(e) => {
                                 typeinfer.typeinfer_expr(&e)?;
                             }
-                            StatementOrExpr::Statement(stmt) => {
+                            StatementOrExpr_::Statement(stmt) => {
                                 typeinfer.typeinfer_statement(&stmt)?
                             }
                         }
                     }
                 }
-                let ty = match &asts[asts.len() - 1] {
-                    StatementOrExpr::Expr(e) => typeinfer.typeinfer_expr(&e)?,
-                    StatementOrExpr::Statement(stmt) => {
+                let ty = match &asts[asts.len() - 1].inner {
+                    StatementOrExpr_::Expr(e) => typeinfer.typeinfer_expr(&e)?,
+                    StatementOrExpr_::Statement(stmt) => {
                         typeinfer.typeinfer_statement(&stmt)?;
                         Type::ttype("()")
                     }
@@ -417,15 +258,15 @@ impl TypeInfer {
                 self.unassigned_num = typeinfer.unassigned_num;
                 Ok(ty)
             }
-            Expr::EVector(exprs) => {
+            Expr_::EVector(exprs) => {
                 let ty = self.newTVar();
                 for expr in exprs {
-                    unify(&ty, &self.typeinfer_expr(expr)?)?;
+                    unify(&ty, &self.typeinfer_expr(&expr)?)?;
                 }
                 Ok(Type::TVector(Box::new(ty)))
             }
-            Expr::EUnary(op, e) => {
-                let ty = self.typeinfer_expr(e)?;
+            Expr_::EUnary(op, e) => {
+                let ty = self.typeinfer_expr(&e)?;
                 match &op as &str {
                     "-" => {
                         unify(&Type::ttype("Int"), &ty)?;
@@ -445,14 +286,14 @@ impl TypeInfer {
                     op => Err(TypeInferError::UnimplementedOperatorError(op.to_owned())),
                 }
             }
-            Expr::EMatch(expr, match_arms) => {
-                let ty = self.typeinfer_expr(expr)?;
+            Expr_::EMatch(expr, match_arms) => {
+                let ty = self.typeinfer_expr(&expr)?;
                 if match_arms.len() == 0 {
                     return Ok(ty);
                 }
                 let result_ty = self.newTVar();
                 for (pattern, expr) in match_arms {
-                    unify(&ty, &self.peak_pattern(pattern)?)?;
+                    unify(&ty, &self.peak_pattern(&pattern)?)?;
                     let mut typeinfer = TypeInfer::from(
                         TypeEnv::new_enclosed_env(Rc::clone(&self.env)),
                         TypeToTypeEnv::new_enclosed_env(Rc::clone(&self.type_to_type_env)),
@@ -460,40 +301,44 @@ impl TypeInfer {
                         self.level,
                     );
                     typeinfer.typeinfer_pattern(&pattern, &ty.unfold(&ty))?;
-                    unify(&result_ty, &typeinfer.typeinfer_expr(expr)?)?;
+                    unify(&result_ty, &typeinfer.typeinfer_expr(&expr)?)?;
                     self.unassigned_num = typeinfer.unassigned_num
                 }
                 Ok(result_ty)
             }
         }
     }
-    fn typeinfer_expr_levelup(&mut self, ast: &Expr) -> Result<Type, TypeInferError> {
+    fn typeinfer_expr_levelup(&mut self, ast: &UntypedExpr) -> Result<Type, TypeInferError> {
         self.level += 1;
         let ty = self.typeinfer_expr(ast)?;
         self.level -= 1;
         Ok(ty)
     }
 
-    fn peak_pattern(&mut self, pattern: &Pattern) -> Result<Type, TypeInferError> {
-        match pattern {
-            Pattern::PValue(e) => self.typeinfer_expr(e),
-            Pattern::PConstructor(name, _) => {
+    fn peak_pattern(&mut self, pattern: &UntypedPattern) -> Result<Type, TypeInferError> {
+        match &pattern.inner {
+            Pattern_::PValue(e) => self.typeinfer_expr(&e),
+            Pattern_::PConstructor(name, _) => {
                 let (_, ty) = self
                     .env
                     .borrow()
-                    .get(name)?
+                    .get(&name)?
                     .separate_to_args_and_resulttype();
                 Ok(ty)
             }
-            Pattern::PVar(_) => Ok(self.newTVar()),
+            Pattern_::PVar(_) => Ok(self.newTVar()),
         }
     }
 
-    fn typeinfer_pattern(&mut self, pattern: &Pattern, ty: &Type) -> Result<(), TypeInferError> {
-        match pattern {
-            Pattern::PValue(value) => unify(&self.typeinfer_expr(value)?, &ty)?,
-            Pattern::PConstructor(name, patterns) => {
-                let args = ty.variant_to_type(name)?;
+    fn typeinfer_pattern(
+        &mut self,
+        pattern: &UntypedPattern,
+        ty: &Type,
+    ) -> Result<(), TypeInferError> {
+        match &pattern.inner {
+            Pattern_::PValue(value) => unify(&self.typeinfer_expr(&value)?, &ty)?,
+            Pattern_::PConstructor(name, patterns) => {
+                let args = ty.variant_to_type(&name)?;
                 if args.len() != patterns.len() {
                     return Err(TypeInferError::InvalidArgumentPatternError(
                         args.len(),
@@ -505,7 +350,7 @@ impl TypeInfer {
                     self.typeinfer_pattern(&patterns[i], &args[i].unfold(&args[i]))?;
                 }
             }
-            Pattern::PVar(var_name) => {
+            Pattern_::PVar(var_name) => {
                 let ty = ty.fold_variant();
                 let new_type = self.newTVar();
                 unify(&new_type, &ty)?;
@@ -515,16 +360,16 @@ impl TypeInfer {
         Ok(())
     }
 
-    pub fn typeinfer_statement(&mut self, ast: &Statement) -> Result<(), TypeInferError> {
-        match ast {
-            Statement::Assign(name, e) => {
+    pub fn typeinfer_statement(&mut self, ast: &UntypedStatement) -> Result<(), TypeInferError> {
+        match &ast.inner {
+            Statement_::Assign(name, e) => {
                 let ty = self.newTVar();
                 self.env.borrow_mut().insert(name.to_string(), ty.clone());
-                let inferred_ty = self.typeinfer_expr_levelup(e)?;
+                let inferred_ty = self.typeinfer_expr_levelup(&e)?;
                 unify(&ty, &inferred_ty)?;
                 self.generalize(&ty);
             }
-            Statement::TypeDef(type_name, constructor_def_vec) => {
+            Statement_::TypeDef(type_name, constructor_def_vec) => {
                 let has_recvar = RefCell::new(false);
                 let variant_type = Type::TVariant(
                     constructor_def_vec
@@ -609,7 +454,7 @@ impl TypeInfer {
         }
     }
 
-    pub fn typeinfer_statements(&mut self, asts: &Statements) -> Result<(), TypeInferError> {
+    pub fn typeinfer_statements(&mut self, asts: &UntypedStatements) -> Result<(), TypeInferError> {
         for ast in asts {
             self.typeinfer_statement(ast)?;
         }

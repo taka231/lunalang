@@ -1,4 +1,4 @@
-use crate::ast::{Expr, StatementOrExpr};
+use crate::ast::{Expr_, StatementOrExpr, StatementOrExpr_};
 use crate::eval::{Eval, Value};
 use crate::parser::{keyword, parser_expr, parser_for_repl, parser_statement_or_expr, symbol};
 use crate::typeinfer::TypeInfer;
@@ -61,8 +61,8 @@ pub fn repl() {
         }
         repl.parse_typecheck();
         let ast = parser_for_repl(&repl.program);
-        match ast {
-            Ok((_, StatementOrExpr::Expr(ast))) => {
+        match ast.map(|e| (e.0, e.1.inner)) {
+            Ok((_, StatementOrExpr_::Expr(ast))) => {
                 let ty = repl.typeinfer.typeinfer_expr(&ast);
                 if let Err(err) = ty {
                     println!("{}", err);
@@ -78,7 +78,7 @@ pub fn repl() {
                     Err(err) => println!("{}", err),
                 }
             }
-            Ok((_, StatementOrExpr::Statement(stmt))) => {
+            Ok((_, StatementOrExpr_::Statement(stmt))) => {
                 match repl.typeinfer.typeinfer_statement(&stmt) {
                     Ok(()) => match repl.eval.eval_statement(stmt) {
                         Ok(()) => (),

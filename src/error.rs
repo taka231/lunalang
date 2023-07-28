@@ -1,4 +1,4 @@
-use crate::typeinfer::Type;
+use crate::types::Type;
 use std::error::Error;
 use std::fmt;
 use std::fmt::Display;

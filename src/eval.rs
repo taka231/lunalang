@@ -2,13 +2,17 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use crate::ast::{ConstructorDef, Expr, Pattern, Statement, StatementOrExpr, Statements};
+use crate::ast::{
+    ConstructorDef, Expr_, Pattern, Pattern_, Statement, StatementOrExpr, StatementOrExpr_,
+    Statement_, Statements, TypedExpr, TypedPattern, TypedStatement, TypedStatements, UntypedExpr,
+    UntypedPattern, UntypedStatement, UntypedStatements,
+};
 use crate::error::EvalError;
 #[derive(Eq, PartialEq, Debug, Clone)]
 pub enum Value {
     VInt(i64),
     VBool(bool),
-    VFun(String, Expr, Environment),
+    VFun(String, UntypedExpr, Environment),
     VString(String),
     VUnit,
     VBuiltin(BuiltinFn, Vec<Value>, usize),
@@ -145,9 +149,9 @@ impl Eval {
             env: Rc::new(RefCell::new(env)),
         }
     }
-    pub fn eval_expr(&self, ast: Expr) -> Result<Value, EvalError> {
-        match ast {
-            Expr::EBinOp(op, e1, e2) => {
+    pub fn eval_expr(&self, ast: UntypedExpr) -> Result<Value, EvalError> {
+        match ast.inner {
+            Expr_::EBinOp(op, e1, e2) => {
                 let v1 = self.eval_expr(*e1)?;
                 let v2 = self.eval_expr(*e2)?;
                 match (v1, v2) {
@@ -175,8 +179,8 @@ impl Eval {
                     (_, _) => Err(EvalError::InternalTypeError),
                 }
             }
-            Expr::EInt(n) => Ok(Value::VInt(n)),
-            Expr::EIf(cond, e1, e2) => {
+            Expr_::EInt(n) => Ok(Value::VInt(n)),
+            Expr_::EIf(cond, e1, e2) => {
                 let cond = self.eval_expr(*cond)?;
                 match cond {
                     Value::VBool(true) => self.eval_expr(*e1),
@@ -184,47 +188,47 @@ impl Eval {
                     _ => Err(EvalError::InternalTypeError),
                 }
             }
-            Expr::EVar(ident) => self.env.borrow().get(&ident),
-            Expr::EFun(arg, e) => Ok(Value::VFun(
+            Expr_::EVar(ident) => self.env.borrow().get(&ident),
+            Expr_::EFun(arg, e) => Ok(Value::VFun(
                 arg,
                 *e,
                 Environment::new_enclosed_env(Rc::clone(&self.env)),
             )),
-            Expr::EFunApp(e1, e2) => {
+            Expr_::EFunApp(e1, e2) => {
                 let v1 = self.eval_expr(*e1)?;
                 let v2 = self.eval_expr(*e2)?;
                 self.fun_app_helper(v1, v2)
             }
-            Expr::EString(str) => Ok(Value::VString(str)),
-            Expr::EUnit => Ok(Value::VUnit),
-            Expr::EBlockExpr(asts) => {
+            Expr_::EString(str) => Ok(Value::VString(str)),
+            Expr_::EUnit => Ok(Value::VUnit),
+            Expr_::EBlockExpr(asts) => {
                 let eval = Eval::from(Environment::new_enclosed_env(Rc::clone(&self.env)));
                 if asts.len() > 1 {
                     for i in 0..(asts.len() - 1) {
-                        match &asts[i] {
-                            StatementOrExpr::Statement(s) => eval.eval_statement(s.clone())?,
-                            StatementOrExpr::Expr(e) => {
+                        match &asts[i].inner {
+                            StatementOrExpr_::Statement(s) => eval.eval_statement(s.clone())?,
+                            StatementOrExpr_::Expr(e) => {
                                 eval.eval_expr(e.clone())?;
                             }
                         }
                     }
                 }
-                match &asts[asts.len() - 1] {
-                    StatementOrExpr::Statement(stmt) => {
+                match &asts[asts.len() - 1].inner {
+                    StatementOrExpr_::Statement(stmt) => {
                         self.eval_statement(stmt.clone())?;
                         Ok(Value::VUnit)
                     }
-                    StatementOrExpr::Expr(e) => eval.eval_expr(e.clone()),
+                    StatementOrExpr_::Expr(e) => eval.eval_expr(e.clone()),
                 }
             }
-            Expr::EVector(exprs) => {
+            Expr_::EVector(exprs) => {
                 let mut vvec = vec![];
                 for e in exprs {
                     vvec.push(self.eval_expr(e)?)
                 }
                 Ok(Value::VVector(vvec))
             }
-            Expr::EUnary(op, e) => match &op as &str {
+            Expr_::EUnary(op, e) => match &op as &str {
                 "-" => {
                     let e = self.eval_expr(*e)?;
                     match e {
@@ -245,7 +249,7 @@ impl Eval {
                 }
                 _ => Err(EvalError::UnimplementedOperatorError(op)),
             },
-            Expr::EMatch(expr, match_arms) => {
+            Expr_::EMatch(expr, match_arms) => {
                 let expr = self.eval_expr(*expr)?;
                 for (pattern, expr_arm) in match_arms {
                     let eval = Eval::from(Environment::new_enclosed_env(Rc::clone(&self.env)));
@@ -257,13 +261,17 @@ impl Eval {
             }
         }
     }
-    fn expr_match_pattern(&self, expr: &Value, pattern: &Pattern) -> Result<bool, EvalError> {
-        match pattern {
-            Pattern::PValue(value) => {
+    fn expr_match_pattern(
+        &self,
+        expr: &Value,
+        pattern: &UntypedPattern,
+    ) -> Result<bool, EvalError> {
+        match &pattern.inner {
+            Pattern_::PValue(value) => {
                 let value = self.eval_expr(value.clone())?;
                 Ok(value == *expr)
             }
-            Pattern::PConstructor(name, patterns) => {
+            Pattern_::PConstructor(name, patterns) => {
                 if let Value::VConstructor(constructor_name, args) = expr {
                     if constructor_name != name {
                         return Ok(false);
@@ -279,19 +287,19 @@ impl Eval {
                     Ok(false)
                 }
             }
-            Pattern::PVar(var_name) => {
+            Pattern_::PVar(var_name) => {
                 self.env.borrow_mut().insert(var_name.clone(), expr.clone());
                 Ok(true)
             }
         }
     }
-    pub fn eval_statement(&self, ast: Statement) -> Result<(), EvalError> {
-        match ast {
-            Statement::Assign(name, e) => {
+    pub fn eval_statement(&self, ast: UntypedStatement) -> Result<(), EvalError> {
+        match ast.inner {
+            Statement_::Assign(name, e) => {
                 let val = self.eval_expr(e)?;
                 Ok(self.env.borrow_mut().insert(name, val))
             }
-            Statement::TypeDef(_, constructor_def_vec) => {
+            Statement_::TypeDef(_, constructor_def_vec) => {
                 for ConstructorDef { name, args } in constructor_def_vec {
                     self.env.borrow_mut().insert(
                         name.to_owned(),
@@ -302,7 +310,7 @@ impl Eval {
             }
         }
     }
-    pub fn eval_statements(&self, asts: Statements) -> Result<(), EvalError> {
+    pub fn eval_statements(&self, asts: UntypedStatements) -> Result<(), EvalError> {
         for ast in asts {
             self.eval_statement(ast)?;
         }
