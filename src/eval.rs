@@ -3,16 +3,15 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use crate::ast::{
-    ConstructorDef, Expr_, Pattern, Pattern_, Statement, StatementOrExpr, StatementOrExpr_,
-    Statement_, Statements, TypedExpr, TypedPattern, TypedStatement, TypedStatements, UntypedExpr,
-    UntypedPattern, UntypedStatement, UntypedStatements,
+    ConstructorDef, Expr_, Pattern_, StatementOrExpr_, Statement_, TypedExpr, TypedPattern,
+    TypedStatement, TypedStatements,
 };
 use crate::error::EvalError;
 #[derive(Eq, PartialEq, Debug, Clone)]
 pub enum Value {
     VInt(i64),
     VBool(bool),
-    VFun(String, UntypedExpr, Environment),
+    VFun(String, TypedExpr, Environment),
     VString(String),
     VUnit,
     VBuiltin(BuiltinFn, Vec<Value>, usize),
@@ -149,7 +148,7 @@ impl Eval {
             env: Rc::new(RefCell::new(env)),
         }
     }
-    pub fn eval_expr(&self, ast: UntypedExpr) -> Result<Value, EvalError> {
+    pub fn eval_expr(&self, ast: TypedExpr) -> Result<Value, EvalError> {
         match ast.inner {
             Expr_::EBinOp(op, e1, e2) => {
                 let v1 = self.eval_expr(*e1)?;
@@ -261,11 +260,7 @@ impl Eval {
             }
         }
     }
-    fn expr_match_pattern(
-        &self,
-        expr: &Value,
-        pattern: &UntypedPattern,
-    ) -> Result<bool, EvalError> {
+    fn expr_match_pattern(&self, expr: &Value, pattern: &TypedPattern) -> Result<bool, EvalError> {
         match &pattern.inner {
             Pattern_::PValue(value) => {
                 let value = self.eval_expr(value.clone())?;
@@ -293,7 +288,7 @@ impl Eval {
             }
         }
     }
-    pub fn eval_statement(&self, ast: UntypedStatement) -> Result<(), EvalError> {
+    pub fn eval_statement(&self, ast: TypedStatement) -> Result<(), EvalError> {
         match ast.inner {
             Statement_::Assign(name, e) => {
                 let val = self.eval_expr(e)?;
@@ -310,7 +305,7 @@ impl Eval {
             }
         }
     }
-    pub fn eval_statements(&self, asts: UntypedStatements) -> Result<(), EvalError> {
+    pub fn eval_statements(&self, asts: TypedStatements) -> Result<(), EvalError> {
         for ast in asts {
             self.eval_statement(ast)?;
         }
@@ -355,9 +350,18 @@ mod tests {
     use super::*;
     use crate::parser::parser_expr;
     use crate::parser::parser_statements;
+    use crate::typeinfer::TypeInfer;
     fn test_eval_expr_helper(str: &str, v: Result<Value, EvalError>) {
         let eval = Eval::new();
-        assert_eq!(eval.eval_expr(parser_expr(str).unwrap().1), v)
+        let mut typeinfer = TypeInfer::new();
+        assert_eq!(
+            eval.eval_expr(
+                typeinfer
+                    .typeinfer_expr(&parser_expr(str).unwrap().1)
+                    .unwrap()
+            ),
+            v
+        )
     }
 
     #[test]
@@ -404,8 +408,13 @@ mod tests {
 
     fn test_eval_statements_helper(str: &str, v: Result<Value, EvalError>) {
         let mut eval = Eval::new();
-        eval.eval_statements(parser_statements(str).unwrap().1)
-            .unwrap();
+        let mut typeinfer = TypeInfer::new();
+        eval.eval_statements(
+            typeinfer
+                .typeinfer_statements(&parser_statements(str).unwrap().1)
+                .unwrap(),
+        )
+        .unwrap();
         assert_eq!(eval.eval_main(), v)
     }
 

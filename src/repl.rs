@@ -1,6 +1,6 @@
-use crate::ast::{Expr_, StatementOrExpr, StatementOrExpr_};
-use crate::eval::{Eval, Value};
-use crate::parser::{keyword, parser_expr, parser_for_repl, parser_statement_or_expr, symbol};
+use crate::ast::StatementOrExpr_;
+use crate::eval::Eval;
+use crate::parser::{parser_for_repl, symbol};
 use crate::typeinfer::TypeInfer;
 use std::io::{self, Write};
 
@@ -63,16 +63,16 @@ pub fn repl() {
         let ast = parser_for_repl(&repl.program);
         match ast.map(|e| (e.0, e.1.inner)) {
             Ok((_, StatementOrExpr_::Expr(ast))) => {
-                let ty = repl.typeinfer.typeinfer_expr(&ast);
-                if let Err(err) = ty {
+                let ast = repl.typeinfer.typeinfer_expr(&ast);
+                if let Err(err) = ast {
                     println!("{}", err);
                     continue;
                 }
                 if repl.is_typecheck {
-                    println!("{}", ty.unwrap());
+                    println!("{}", ast.unwrap().ty);
                     continue;
                 }
-                let result = repl.eval.eval_expr(ast);
+                let result = repl.eval.eval_expr(ast.unwrap());
                 match result {
                     Ok(e) => println!("{:?}", e),
                     Err(err) => println!("{}", err),
@@ -80,7 +80,7 @@ pub fn repl() {
             }
             Ok((_, StatementOrExpr_::Statement(stmt))) => {
                 match repl.typeinfer.typeinfer_statement(&stmt) {
-                    Ok(()) => match repl.eval.eval_statement(stmt) {
+                    Ok(stmt) => match repl.eval.eval_statement(stmt) {
                         Ok(()) => (),
                         Err(err) => println!("{}", err),
                     },

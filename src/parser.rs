@@ -1,7 +1,7 @@
 use crate::{
     ast::{
-        ConstructorDef, Pattern, Statement, StatementOrExpr, UntypedExpr, UntypedPattern,
-        UntypedStatement, UntypedStatementOrExpr, UntypedStatements,
+        ConstructorDef, UntypedExpr, UntypedPattern, UntypedStatement, UntypedStatementOrExpr,
+        UntypedStatements,
     },
     types::Type,
 };
