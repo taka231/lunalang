@@ -1,14 +1,4 @@
-[package]
-name = "lunalang"
-version = "0.1.0"
-edition = "2021"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
-[dependencies]
-nom = "7.1.3"
-once_cell = "1.17.0"
-argopt="0.3.0"
-
-[dev-dependencies]
-rstest = "0.18.1"
+[workspace]
+members = [
+  "lunalang",
+]
