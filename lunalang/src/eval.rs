@@ -22,6 +22,12 @@ pub enum Value {
 
 type BuiltinFn = fn(Vec<Value>, Eval) -> Result<Value, EvalError>;
 
+#[derive(Eq, PartialEq, Debug, Clone, Copy)]
+pub enum Mode {
+    Repl,
+    Playground,
+}
+
 #[derive(Eq, PartialEq, Debug, Clone)]
 pub struct Environment {
     env: HashMap<String, Value>,
@@ -134,18 +140,24 @@ impl Environment {
 
 pub struct Eval {
     env: Rc<RefCell<Environment>>,
+    depth: usize,
+    mode: Mode,
 }
 
 impl Eval {
-    pub fn new() -> Eval {
+    pub fn new(mode: Mode) -> Eval {
         let env = Environment::new();
         Eval {
             env: Rc::new(RefCell::new(env)),
+            depth: 0,
+            mode,
         }
     }
-    fn from(env: Environment) -> Eval {
+    fn from(env: Environment, depth: usize, mode: Mode) -> Eval {
         Eval {
             env: Rc::new(RefCell::new(env)),
+            depth,
+            mode,
         }
     }
     pub fn eval_expr(&self, ast: TypedExpr) -> Result<Value, EvalError> {
@@ -201,7 +213,11 @@ impl Eval {
             Expr_::EString(str) => Ok(Value::VString(str)),
             Expr_::EUnit => Ok(Value::VUnit),
             Expr_::EBlockExpr(asts) => {
-                let eval = Eval::from(Environment::new_enclosed_env(Rc::clone(&self.env)));
+                let eval = Eval::from(
+                    Environment::new_enclosed_env(Rc::clone(&self.env)),
+                    self.depth,
+                    self.mode,
+                );
                 if asts.len() > 1 {
                     for i in 0..(asts.len() - 1) {
                         match &asts[i].inner {
@@ -251,7 +267,11 @@ impl Eval {
             Expr_::EMatch(expr, match_arms) => {
                 let expr = self.eval_expr(*expr)?;
                 for (pattern, expr_arm) in match_arms {
-                    let eval = Eval::from(Environment::new_enclosed_env(Rc::clone(&self.env)));
+                    let eval = Eval::from(
+                        Environment::new_enclosed_env(Rc::clone(&self.env)),
+                        self.depth,
+                        self.mode,
+                    );
                     if eval.expr_match_pattern(&expr, &pattern)? == true {
                         return eval.eval_expr(expr_arm);
                     }
@@ -317,7 +337,10 @@ impl Eval {
     fn fun_app_helper(&self, v1: Value, v2: Value) -> Result<Value, EvalError> {
         match v1 {
             Value::VFun(arg, expr, env) => {
-                let eval = Eval::from(env);
+                if self.mode == Mode::Playground && self.depth >= 29 {
+                    return Err(EvalError::RecursionLimitExceeded);
+                }
+                let eval = Eval::from(env, self.depth + 1, self.mode);
                 eval.env.borrow_mut().insert(arg, v2);
                 eval.eval_expr(expr)
             }
@@ -329,6 +352,8 @@ impl Eval {
                         args_mut,
                         Eval {
                             env: Rc::clone(&self.env),
+                            depth: self.depth + 1,
+                            mode: self.mode,
                         },
                     )
                 } else {
@@ -352,7 +377,7 @@ mod tests {
     use crate::parser::parser_statements;
     use crate::typeinfer::TypeInfer;
     fn test_eval_expr_helper(str: &str, v: Result<Value, EvalError>) {
-        let eval = Eval::new();
+        let eval = Eval::new(Mode::Repl);
         let mut typeinfer = TypeInfer::new();
         assert_eq!(
             eval.eval_expr(
@@ -407,7 +432,7 @@ mod tests {
     }
 
     fn test_eval_statements_helper(str: &str, v: Result<Value, EvalError>) {
-        let mut eval = Eval::new();
+        let mut eval = Eval::new(Mode::Repl);
         let mut typeinfer = TypeInfer::new();
         eval.eval_statements(
             typeinfer

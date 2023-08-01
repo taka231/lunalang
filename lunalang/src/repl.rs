@@ -1,5 +1,5 @@
 use crate::ast::StatementOrExpr_;
-use crate::eval::Eval;
+use crate::eval::{Eval, Mode};
 use crate::parser::{parser_for_repl, symbol};
 use crate::typeinfer::TypeInfer;
 use std::io::{self, Write};
@@ -14,7 +14,7 @@ pub struct REPL {
 impl REPL {
     fn new() -> Self {
         REPL {
-            eval: Eval::new(),
+            eval: Eval::new(Mode::Repl),
             typeinfer: TypeInfer::new(),
             is_typecheck: false,
             program: "".to_string(),
