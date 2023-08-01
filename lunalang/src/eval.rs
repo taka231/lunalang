@@ -41,6 +41,9 @@ impl Display for Value {
                 write!(f, "]")
             }
             Value::VConstructor(name, args, n) => {
+                if *n == 0 {
+                    return write!(f, "{}", name);
+                }
                 if *n != args.len() {
                     write!(f, "<constructor {} with args [", name);
                     for (i, v) in args.iter().enumerate() {
@@ -379,7 +382,7 @@ impl Eval {
                 for ConstructorDef { name, args } in &constructor_def_vec {
                     self.env.borrow_mut().insert(
                         name.to_owned(),
-                        Value::VConstructor(name.to_owned(), vec![], constructor_def_vec.len()),
+                        Value::VConstructor(name.to_owned(), vec![], args.len()),
                     )
                 }
                 Ok(())
