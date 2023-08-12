@@ -1,4 +1,5 @@
 [workspace]
 members = [
   "lunalang",
+  "playground_backend",
 ]
