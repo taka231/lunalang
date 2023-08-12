@@ -58,6 +58,7 @@ pub enum EvalError {
     UnimplementedOperatorError(String),
     UndefinedVariable(String),
     NotMatchAnyPattern,
+    RecursionLimitExceeded,
 }
 
 impl Display for EvalError {
@@ -72,6 +73,9 @@ impl Display for EvalError {
             }
             Self::NotMatchAnyPattern => {
                 write!(f, "does not match any pattern")
+            }
+            Self::RecursionLimitExceeded => {
+                write!(f, "recursion limit exceeded")
             }
         }
     }

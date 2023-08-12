@@ -1,7 +1,12 @@
 use std::{error::Error, fs::File, io::Read, path::Path};
 
 use argopt;
-use lunalang::{eval::Eval, parser::parser_statements, repl::repl, typeinfer::TypeInfer};
+use lunalang::{
+    eval::{Eval, Mode},
+    parser::parser_statements,
+    repl::repl,
+    typeinfer::TypeInfer,
+};
 
 #[argopt::cmd]
 fn main(file_name: Option<String>) {
@@ -31,7 +36,7 @@ fn exec_file(file_name: String) -> Result<(), Box<dyn Error>> {
             Ok((_, ast)) => {
                 let mut typeinfer = TypeInfer::new();
                 let ast = typeinfer.typeinfer_statements(&ast)?;
-                let eval = Eval::new();
+                let eval = Eval::new(Mode::Repl);
                 eval.eval_statements(ast)?;
                 Ok(())
             }

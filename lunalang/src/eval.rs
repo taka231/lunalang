@@ -1,5 +1,6 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::fmt::Display;
 use std::rc::Rc;
 
 use crate::ast::{
@@ -7,6 +8,7 @@ use crate::ast::{
     TypedStatement, TypedStatements,
 };
 use crate::error::EvalError;
+use crate::types::Type;
 #[derive(Eq, PartialEq, Debug, Clone)]
 pub enum Value {
     VInt(i64),
@@ -14,13 +16,76 @@ pub enum Value {
     VFun(String, TypedExpr, Environment),
     VString(String),
     VUnit,
-    VBuiltin(BuiltinFn, Vec<Value>, usize),
+    VBuiltin(String, BuiltinFn, Vec<Value>, usize),
     VVector(Vec<Value>),
-    VConstructor(String, Vec<Value>),
+    VConstructor(String, Vec<Value>, usize),
     VRef(Rc<RefCell<Value>>),
 }
 
+impl Display for Value {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Value::VInt(n) => write!(f, "{}", n),
+            Value::VBool(b) => write!(f, "{}", b),
+            Value::VFun(name, e, env) => write!(f, "<fun {}: {}>", name, e.ty),
+            Value::VString(str) => write!(f, "{}", str),
+            Value::VUnit => write!(f, "()"),
+            Value::VVector(vec) => {
+                write!(f, "[")?;
+                for (i, v) in vec.iter().enumerate() {
+                    write!(f, "{}", v)?;
+                    if i != vec.len() - 1 {
+                        write!(f, ", ")?;
+                    }
+                }
+                write!(f, "]")
+            }
+            Value::VConstructor(name, args, n) => {
+                if *n == 0 {
+                    return write!(f, "{}", name);
+                }
+                if *n != args.len() {
+                    write!(f, "<constructor {} with args [", name);
+                    for (i, v) in args.iter().enumerate() {
+                        write!(f, "{}", v)?;
+                        if i != args.len() - 1 {
+                            write!(f, ", ")?;
+                        }
+                    }
+                    write!(f, "]>")
+                } else {
+                    write!(f, "{}(", name)?;
+                    for (i, v) in args.iter().enumerate() {
+                        write!(f, "{}", v)?;
+                        if i != args.len() - 1 {
+                            write!(f, ", ")?;
+                        }
+                    }
+                    write!(f, ")")
+                }
+            }
+            Value::VRef(r) => write!(f, "Ref ( content = {} )", r.borrow()),
+            Value::VBuiltin(name, _, args, _) => {
+                write!(f, "<builtin {} with args [", name)?;
+                for (i, v) in args.iter().enumerate() {
+                    write!(f, "{}", v)?;
+                    if i != args.len() - 1 {
+                        write!(f, ", ")?;
+                    }
+                }
+                write!(f, "]>")
+            }
+        }
+    }
+}
+
 type BuiltinFn = fn(Vec<Value>, Eval) -> Result<Value, EvalError>;
+
+#[derive(Eq, PartialEq, Debug, Clone, Copy)]
+pub enum Mode {
+    Repl,
+    Playground,
+}
 
 #[derive(Eq, PartialEq, Debug, Clone)]
 pub struct Environment {
@@ -64,9 +129,14 @@ impl Environment {
         builtin.insert(
             "puts".to_owned(),
             Value::VBuiltin(
-                |values, _| match &values[0] {
+                "puts".to_owned(),
+                |values, eval| match &values[0] {
                     Value::VString(str) => {
-                        println!("{}", str);
+                        if eval.mode == Mode::Repl {
+                            println!("{}", str);
+                        } else {
+                            eval.stdout.borrow_mut().push_str(&(str.to_owned() + "\n"))
+                        }
                         Ok(Value::VUnit)
                     }
                     _ => Err(EvalError::InternalTypeError),
@@ -78,8 +148,9 @@ impl Environment {
         builtin.insert(
             "foreach".to_owned(),
             Value::VBuiltin(
+                "foreach".to_owned(),
                 |values, eval| match (&values[0], &values[1]) {
-                    (Value::VFun(_, _, _) | Value::VBuiltin(_, _, _), Value::VVector(vec)) => {
+                    (Value::VFun(_, _, _) | Value::VBuiltin(_, _, _, _), Value::VVector(vec)) => {
                         for value in vec {
                             eval.fun_app_helper(values[0].clone(), value.clone())?;
                         }
@@ -94,6 +165,7 @@ impl Environment {
         builtin.insert(
             "int_to_string".to_owned(),
             Value::VBuiltin(
+                "int_to_string".to_owned(),
                 |values, _| match &values[0] {
                     Value::VInt(n) => Ok(Value::VString(n.to_string())),
                     _ => Err(EvalError::InternalTypeError),
@@ -105,6 +177,7 @@ impl Environment {
         builtin.insert(
             "enum_from_until".to_owned(),
             Value::VBuiltin(
+                "enum_from_until".to_owned(),
                 |values, _| match (&values[0], &values[1]) {
                     (Value::VInt(n1), Value::VInt(n2)) => Ok(Value::VVector(
                         (*n1..=*n2).into_iter().map(|x| Value::VInt(x)).collect(),
@@ -118,6 +191,7 @@ impl Environment {
         builtin.insert(
             "enum_from_to".to_owned(),
             Value::VBuiltin(
+                "enum_from_to".to_owned(),
                 |values, _| match (&values[0], &values[1]) {
                     (Value::VInt(n1), Value::VInt(n2)) => Ok(Value::VVector(
                         (*n1..*n2).into_iter().map(|x| Value::VInt(x)).collect(),
@@ -134,18 +208,27 @@ impl Environment {
 
 pub struct Eval {
     env: Rc<RefCell<Environment>>,
+    depth: usize,
+    mode: Mode,
+    pub stdout: Rc<RefCell<String>>,
 }
 
 impl Eval {
-    pub fn new() -> Eval {
+    pub fn new(mode: Mode) -> Eval {
         let env = Environment::new();
         Eval {
             env: Rc::new(RefCell::new(env)),
+            depth: 0,
+            mode,
+            stdout: Rc::new(RefCell::new("".to_owned())),
         }
     }
-    fn from(env: Environment) -> Eval {
+    fn from(env: Environment, depth: usize, mode: Mode, stdout: &Rc<RefCell<String>>) -> Eval {
         Eval {
             env: Rc::new(RefCell::new(env)),
+            depth,
+            mode,
+            stdout: Rc::clone(stdout),
         }
     }
     pub fn eval_expr(&self, ast: TypedExpr) -> Result<Value, EvalError> {
@@ -201,7 +284,12 @@ impl Eval {
             Expr_::EString(str) => Ok(Value::VString(str)),
             Expr_::EUnit => Ok(Value::VUnit),
             Expr_::EBlockExpr(asts) => {
-                let eval = Eval::from(Environment::new_enclosed_env(Rc::clone(&self.env)));
+                let eval = Eval::from(
+                    Environment::new_enclosed_env(Rc::clone(&self.env)),
+                    self.depth,
+                    self.mode,
+                    &self.stdout,
+                );
                 if asts.len() > 1 {
                     for i in 0..(asts.len() - 1) {
                         match &asts[i].inner {
@@ -251,7 +339,12 @@ impl Eval {
             Expr_::EMatch(expr, match_arms) => {
                 let expr = self.eval_expr(*expr)?;
                 for (pattern, expr_arm) in match_arms {
-                    let eval = Eval::from(Environment::new_enclosed_env(Rc::clone(&self.env)));
+                    let eval = Eval::from(
+                        Environment::new_enclosed_env(Rc::clone(&self.env)),
+                        self.depth,
+                        self.mode,
+                        &self.stdout,
+                    );
                     if eval.expr_match_pattern(&expr, &pattern)? == true {
                         return eval.eval_expr(expr_arm);
                     }
@@ -267,7 +360,7 @@ impl Eval {
                 Ok(value == *expr)
             }
             Pattern_::PConstructor(name, patterns) => {
-                if let Value::VConstructor(constructor_name, args) = expr {
+                if let Value::VConstructor(constructor_name, args, _) = expr {
                     if constructor_name != name {
                         return Ok(false);
                     } else if patterns.len() != args.len() {
@@ -295,10 +388,10 @@ impl Eval {
                 Ok(self.env.borrow_mut().insert(name, val))
             }
             Statement_::TypeDef(_, constructor_def_vec) => {
-                for ConstructorDef { name, args } in constructor_def_vec {
+                for ConstructorDef { name, args } in &constructor_def_vec {
                     self.env.borrow_mut().insert(
                         name.to_owned(),
-                        Value::VConstructor(name.to_owned(), vec![]),
+                        Value::VConstructor(name.to_owned(), vec![], args.len()),
                     )
                 }
                 Ok(())
@@ -317,11 +410,14 @@ impl Eval {
     fn fun_app_helper(&self, v1: Value, v2: Value) -> Result<Value, EvalError> {
         match v1 {
             Value::VFun(arg, expr, env) => {
-                let eval = Eval::from(env);
+                if self.mode == Mode::Playground && self.depth >= 29 {
+                    return Err(EvalError::RecursionLimitExceeded);
+                }
+                let eval = Eval::from(env, self.depth + 1, self.mode, &self.stdout);
                 eval.env.borrow_mut().insert(arg, v2);
                 eval.eval_expr(expr)
             }
-            Value::VBuiltin(fun, args, args_num) => {
+            Value::VBuiltin(name, fun, args, args_num) => {
                 let mut args_mut = args;
                 args_mut.push(v2);
                 if args_mut.len() == args_num {
@@ -329,16 +425,19 @@ impl Eval {
                         args_mut,
                         Eval {
                             env: Rc::clone(&self.env),
+                            depth: self.depth + 1,
+                            mode: self.mode,
+                            stdout: Rc::clone(&self.stdout),
                         },
                     )
                 } else {
-                    Ok(Value::VBuiltin(fun, args_mut, args_num))
+                    Ok(Value::VBuiltin(name, fun, args_mut, args_num))
                 }
             }
-            Value::VConstructor(name, args) => {
+            Value::VConstructor(name, args, n) => {
                 let mut mut_args = args;
                 mut_args.push(v2);
-                Ok(Value::VConstructor(name, mut_args))
+                Ok(Value::VConstructor(name, mut_args, n))
             }
             _ => Err(EvalError::InternalTypeError),
         }
@@ -352,7 +451,7 @@ mod tests {
     use crate::parser::parser_statements;
     use crate::typeinfer::TypeInfer;
     fn test_eval_expr_helper(str: &str, v: Result<Value, EvalError>) {
-        let eval = Eval::new();
+        let eval = Eval::new(Mode::Repl);
         let mut typeinfer = TypeInfer::new();
         assert_eq!(
             eval.eval_expr(
@@ -407,7 +506,7 @@ mod tests {
     }
 
     fn test_eval_statements_helper(str: &str, v: Result<Value, EvalError>) {
-        let mut eval = Eval::new();
+        let mut eval = Eval::new(Mode::Repl);
         let mut typeinfer = TypeInfer::new();
         eval.eval_statements(
             typeinfer
@@ -478,7 +577,11 @@ let main = sum([1..=100]);",
     fn test_enum() {
         test_eval_statements_helper(
             "enum Hoge{Foo(Int)}; let main = Foo(3);",
-            Ok(Value::VConstructor("Foo".to_owned(), vec![Value::VInt(3)])),
+            Ok(Value::VConstructor(
+                "Foo".to_owned(),
+                vec![Value::VInt(3)],
+                1,
+            )),
         )
     }
 
