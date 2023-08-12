@@ -130,9 +130,13 @@ impl Environment {
             "puts".to_owned(),
             Value::VBuiltin(
                 "puts".to_owned(),
-                |values, _| match &values[0] {
+                |values, eval| match &values[0] {
                     Value::VString(str) => {
-                        println!("{}", str);
+                        if eval.mode == Mode::Repl {
+                            println!("{}", str);
+                        } else {
+                            eval.stdout.borrow_mut().push_str(&(str.to_owned() + "\n"))
+                        }
                         Ok(Value::VUnit)
                     }
                     _ => Err(EvalError::InternalTypeError),
@@ -206,6 +210,7 @@ pub struct Eval {
     env: Rc<RefCell<Environment>>,
     depth: usize,
     mode: Mode,
+    pub stdout: Rc<RefCell<String>>,
 }
 
 impl Eval {
@@ -215,13 +220,15 @@ impl Eval {
             env: Rc::new(RefCell::new(env)),
             depth: 0,
             mode,
+            stdout: Rc::new(RefCell::new("".to_owned())),
         }
     }
-    fn from(env: Environment, depth: usize, mode: Mode) -> Eval {
+    fn from(env: Environment, depth: usize, mode: Mode, stdout: &Rc<RefCell<String>>) -> Eval {
         Eval {
             env: Rc::new(RefCell::new(env)),
             depth,
             mode,
+            stdout: Rc::clone(stdout),
         }
     }
     pub fn eval_expr(&self, ast: TypedExpr) -> Result<Value, EvalError> {
@@ -281,6 +288,7 @@ impl Eval {
                     Environment::new_enclosed_env(Rc::clone(&self.env)),
                     self.depth,
                     self.mode,
+                    &self.stdout,
                 );
                 if asts.len() > 1 {
                     for i in 0..(asts.len() - 1) {
@@ -335,6 +343,7 @@ impl Eval {
                         Environment::new_enclosed_env(Rc::clone(&self.env)),
                         self.depth,
                         self.mode,
+                        &self.stdout,
                     );
                     if eval.expr_match_pattern(&expr, &pattern)? == true {
                         return eval.eval_expr(expr_arm);
@@ -404,7 +413,7 @@ impl Eval {
                 if self.mode == Mode::Playground && self.depth >= 29 {
                     return Err(EvalError::RecursionLimitExceeded);
                 }
-                let eval = Eval::from(env, self.depth + 1, self.mode);
+                let eval = Eval::from(env, self.depth + 1, self.mode, &self.stdout);
                 eval.env.borrow_mut().insert(arg, v2);
                 eval.eval_expr(expr)
             }
@@ -418,6 +427,7 @@ impl Eval {
                             env: Rc::clone(&self.env),
                             depth: self.depth + 1,
                             mode: self.mode,
+                            stdout: Rc::clone(&self.stdout),
                         },
                     )
                 } else {
