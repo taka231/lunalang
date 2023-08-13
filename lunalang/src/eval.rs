@@ -127,15 +127,34 @@ impl Environment {
     fn builtin() -> HashMap<String, Value> {
         let mut builtin = HashMap::new();
         builtin.insert(
-            "puts".to_owned(),
+            "println".to_owned(),
             Value::VBuiltin(
-                "puts".to_owned(),
+                "println".to_owned(),
                 |values, eval| match &values[0] {
                     Value::VString(str) => {
                         if eval.mode == Mode::Repl {
                             println!("{}", str);
                         } else {
                             eval.stdout.borrow_mut().push_str(&(str.to_owned() + "\n"))
+                        }
+                        Ok(Value::VUnit)
+                    }
+                    _ => Err(EvalError::InternalTypeError),
+                },
+                vec![],
+                1,
+            ),
+        );
+        builtin.insert(
+            "print".to_owned(),
+            Value::VBuiltin(
+                "print".to_owned(),
+                |values, eval| match &values[0] {
+                    Value::VString(str) => {
+                        if eval.mode == Mode::Repl {
+                            print!("{}", str);
+                        } else {
+                            eval.stdout.borrow_mut().push_str(str)
                         }
                         Ok(Value::VUnit)
                     }
