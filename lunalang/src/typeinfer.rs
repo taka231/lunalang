@@ -48,7 +48,11 @@ impl TypeEnv {
     fn builtin() -> HashMap<String, Type> {
         let mut builtin = HashMap::new();
         builtin.insert(
-            "puts".to_owned(),
+            "println".to_owned(),
+            Type::fun(Type::ttype("String"), Type::ttype("()")),
+        );
+        builtin.insert(
+            "print".to_owned(),
             Type::fun(Type::ttype("String"), Type::ttype("()")),
         );
         builtin.insert(
@@ -786,7 +790,7 @@ mod tests {
     )]
     #[case("\"hoge\"", Ok(Type::ttype("String")))]
     #[case("()", Ok(Type::ttype("()")))]
-    #[case(r#"puts("Hello, world!")"#, Ok(Type::ttype("()")))]
+    #[case(r#"println("Hello, world!")"#, Ok(Type::ttype("()")))]
     #[case("{let x = 1; x == 1;}", Ok(Type::ttype("Bool")))]
     #[case(
         "{let x = 1; x == \"hoge\";}",
