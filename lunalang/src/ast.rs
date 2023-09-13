@@ -167,7 +167,7 @@ pub type TypedPattern = Pattern<Type, ()>;
 
 #[derive(PartialEq, Eq, Debug, Clone)]
 pub enum Statement_<Ty, Span> {
-    Assign(String, Expr<Ty, Span>),
+    Assign(String, Option<Type>, Expr<Ty, Span>),
     TypeDef(String, Vec<ConstructorDef>),
 }
 
@@ -175,11 +175,11 @@ pub type Statement<Ty, Span> = Annot<(), Span, Statement_<Ty, Span>>;
 pub type UntypedStatement = Statement<(), ()>;
 
 impl UntypedStatement {
-    pub fn assign(name: &str, e: UntypedExpr) -> Self {
+    pub fn assign(name: &str, ty: Option<Type>, e: UntypedExpr) -> Self {
         Annot {
             ty: (),
             span: (),
-            inner: Statement_::Assign(name.to_string(), e),
+            inner: Statement_::Assign(name.to_string(), ty, e),
         }
     }
     pub fn type_def(name: &str, v: Vec<ConstructorDef>) -> Self {

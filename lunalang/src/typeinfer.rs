@@ -497,8 +497,11 @@ impl TypeInfer {
         ast: &UntypedStatement,
     ) -> Result<TypedStatement, TypeInferError> {
         match &ast.inner {
-            Statement_::Assign(name, e) => {
-                let ty = self.newTVar();
+            Statement_::Assign(name, opt_ty, e) => {
+                let ty = match opt_ty {
+                    Some(ty) => ty.clone(),
+                    None => self.newTVar(),
+                };
                 self.env.borrow_mut().insert(name.to_string(), ty.clone());
                 let e = self.typeinfer_expr_levelup(&e)?;
                 unify(&ty, &e.ty)?;
@@ -506,7 +509,7 @@ impl TypeInfer {
                 Ok(Annot {
                     ty: (),
                     span: (),
-                    inner: Statement_::Assign(name.to_string(), e),
+                    inner: Statement_::Assign(name.to_string(), opt_ty.clone(), e),
                 })
             }
             Statement_::TypeDef(type_name, constructor_def_vec) => {

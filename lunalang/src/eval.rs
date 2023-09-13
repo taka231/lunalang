@@ -402,7 +402,7 @@ impl Eval {
     }
     pub fn eval_statement(&self, ast: TypedStatement) -> Result<(), EvalError> {
         match ast.inner {
-            Statement_::Assign(name, e) => {
+            Statement_::Assign(name, _, e) => {
                 let val = self.eval_expr(e)?;
                 Ok(self.env.borrow_mut().insert(name, val))
             }
