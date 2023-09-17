@@ -416,6 +416,25 @@ impl TypeInfer {
                     inner: Expr_::EMatch(Box::new(match_expr), result_match_arms),
                 })
             }
+            Expr_::EMethod(receiver, ident, args) => {
+                let fun_type = self.env.borrow().get(&ident)?;
+                let receiver = self.typeinfer_expr(&receiver)?;
+                let args = args
+                    .iter()
+                    .map(|arg| self.typeinfer_expr(&arg))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let result_type = self.newTVar();
+                let mut ty = Type::fun(receiver.ty.clone(), result_type.clone());
+                for arg in args.iter().rev() {
+                    ty = Type::fun(arg.ty.clone(), ty)
+                }
+                unify(&fun_type, &ty)?;
+                Ok(Annot {
+                    ty: result_type,
+                    span: (),
+                    inner: Expr_::EMethod(Box::new(receiver), ident.clone(), args),
+                })
+            }
         }
     }
     fn typeinfer_expr_levelup(&mut self, ast: &UntypedExpr) -> Result<TypedExpr, TypeInferError> {

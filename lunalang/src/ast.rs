@@ -21,6 +21,7 @@ pub enum Expr_<Ty, Span> {
         Box<Expr<Ty, Span>>,
         Vec<(Pattern<Ty, Span>, Expr<Ty, Span>)>,
     ),
+    EMethod(Box<Expr<Ty, Span>>, String, Vec<Expr<Ty, Span>>),
 }
 
 pub type Expr<Ty, Span> = Annot<Ty, Span, Expr_<Ty, Span>>;
@@ -115,6 +116,13 @@ impl UntypedExpr {
             ty: (),
             span: (),
             inner: Expr_::EUnary(op.to_string(), Box::new(e)),
+        }
+    }
+    pub fn e_method(receiver: Self, ident: &str, args: Vec<Self>) -> Self {
+        Annot {
+            ty: (),
+            span: (),
+            inner: Expr_::EMethod(Box::new(receiver), ident.to_string(), args),
         }
     }
 }

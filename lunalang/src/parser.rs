@@ -470,11 +470,7 @@ pub fn dot_expr(input: &str) -> IResult<&str, UntypedExpr> {
             Ok((input, args))
         })(input)?;
         let args = args.unwrap_or(vec![]);
-        let mut temp_expr = UntypedExpr::e_var(&ident);
-        for arg in args {
-            temp_expr = UntypedExpr::fun_app(temp_expr, arg);
-        }
-        Ok((input, temp_expr))
+        Ok((input, (ident, args)))
     })(input)?;
     let (input, opt_expr) = opt(block_term)(input)?;
     match opt_expr {
@@ -484,11 +480,11 @@ pub fn dot_expr(input: &str) -> IResult<&str, UntypedExpr> {
                 return Ok((input, UntypedExpr::fun_app(expr, e)));
             }
             let len = temp_exprs.len();
-            temp_exprs[len - 1] = UntypedExpr::fun_app(temp_exprs[len - 1].clone(), e)
+            temp_exprs[len - 1].1.push(e);
         }
     }
-    for temp_expr in temp_exprs {
-        expr = UntypedExpr::fun_app(temp_expr, expr)
+    for (ident, args) in temp_exprs {
+        expr = UntypedExpr::e_method(expr, &ident, args)
     }
     Ok((input, expr))
 }
@@ -963,6 +959,13 @@ mod tests {
                 )
             ))
         );
+        assert_eq!(
+            parser_type_init("a -> a", Rc::new(RefCell::new(HashMap::new()))),
+            Ok((
+                "",
+                Type::TFun(Box::new(Type::TQVar(0)), Box::new(Type::TQVar(0)))
+            ))
+        );
     }
 
     #[test]
@@ -987,7 +990,21 @@ mod tests {
                     )
                 )
             ))
-        )
+        );
+        assert_eq!(
+            fun_def("let id(x: a): a = x;"),
+            Ok((
+                "",
+                UntypedStatement::assign(
+                    "id",
+                    Some(Type::TFun(
+                        Box::new(Type::TQVar(0)),
+                        Box::new(Type::TQVar(0))
+                    )),
+                    UntypedExpr::e_fun("x", UntypedExpr::e_var("x"))
+                )
+            ))
+        );
     }
 
     #[test]
@@ -1090,36 +1107,34 @@ mod tests {
             dot_expr("3.inc"),
             Ok((
                 "",
-                UntypedExpr::fun_app(UntypedExpr::e_var("inc"), UntypedExpr::e_int(3))
+                UntypedExpr::e_method(UntypedExpr::e_int(3), "inc", vec![])
             ))
         );
         assert_eq!(
             dot_expr("3.inc()"),
             Ok((
                 "",
-                UntypedExpr::fun_app(UntypedExpr::e_var("inc"), UntypedExpr::e_int(3))
+                UntypedExpr::e_method(UntypedExpr::e_int(3), "inc", vec![]),
             ))
         );
         assert_eq!(
             dot_expr("3.add(2)"),
             Ok((
                 "",
-                UntypedExpr::fun_app(
-                    UntypedExpr::fun_app(UntypedExpr::e_var("add"), UntypedExpr::e_int(2)),
-                    UntypedExpr::e_int(3)
-                )
+                UntypedExpr::e_method(UntypedExpr::e_int(3), "add", vec![UntypedExpr::e_int(2)]),
             ))
         );
         assert_eq!(
             dot_expr("add(2, 3).inc"),
             Ok((
                 "",
-                UntypedExpr::fun_app(
-                    UntypedExpr::e_var("inc"),
+                UntypedExpr::e_method(
                     UntypedExpr::fun_app(
                         UntypedExpr::fun_app(UntypedExpr::e_var("add"), UntypedExpr::e_int(2)),
                         UntypedExpr::e_int(3)
-                    )
+                    ),
+                    "inc",
+                    vec![]
                 )
             ))
         );
@@ -1127,27 +1142,27 @@ mod tests {
             dot_expr("3.add(2).add(4)"),
             Ok((
                 "",
-                UntypedExpr::fun_app(
-                    UntypedExpr::fun_app(UntypedExpr::e_var("add"), UntypedExpr::e_int(4)),
-                    UntypedExpr::fun_app(
-                        UntypedExpr::fun_app(UntypedExpr::e_var("add"), UntypedExpr::e_int(2)),
-                        UntypedExpr::e_int(3)
-                    )
-                )
+                UntypedExpr::e_method(
+                    UntypedExpr::e_method(
+                        UntypedExpr::e_int(3),
+                        "add",
+                        vec![UntypedExpr::e_int(2)]
+                    ),
+                    "add",
+                    vec![UntypedExpr::e_int(4)]
+                ),
             ))
         );
         assert_eq!(
             dot_expr("3.add {2;}"),
             Ok((
                 "",
-                UntypedExpr::fun_app(
-                    UntypedExpr::fun_app(
-                        UntypedExpr::e_var("add"),
-                        UntypedExpr::e_block_expr(vec![UntypedStatementOrExpr::expr(
-                            UntypedExpr::e_int(2)
-                        )])
-                    ),
-                    UntypedExpr::e_int(3)
+                UntypedExpr::e_method(
+                    UntypedExpr::e_int(3),
+                    "add",
+                    vec![UntypedExpr::e_block_expr(vec![
+                        UntypedStatementOrExpr::expr(UntypedExpr::e_int(2))
+                    ])]
                 )
             ))
         );
@@ -1155,14 +1170,12 @@ mod tests {
             dot_expr("3.add() {2;}"),
             Ok((
                 "",
-                UntypedExpr::fun_app(
-                    UntypedExpr::fun_app(
-                        UntypedExpr::e_var("add"),
-                        UntypedExpr::e_block_expr(vec![UntypedStatementOrExpr::expr(
-                            UntypedExpr::e_int(2)
-                        )])
-                    ),
-                    UntypedExpr::e_int(3)
+                UntypedExpr::e_method(
+                    UntypedExpr::e_int(3),
+                    "add",
+                    vec![UntypedExpr::e_block_expr(vec![
+                        UntypedStatementOrExpr::expr(UntypedExpr::e_int(2))
+                    ])]
                 )
             ))
         );

@@ -370,6 +370,13 @@ impl Eval {
                 }
                 Err(EvalError::NotMatchAnyPattern)
             }
+            Expr_::EMethod(receiver, ident, args) => {
+                let mut result = self.env.borrow().get(&ident)?;
+                for arg in args {
+                    result = self.fun_app_helper(result, self.eval_expr(arg)?)?;
+                }
+                Ok(self.fun_app_helper(result, self.eval_expr(*receiver)?)?)
+            }
         }
     }
     fn expr_match_pattern(&self, expr: &Value, pattern: &TypedPattern) -> Result<bool, EvalError> {
