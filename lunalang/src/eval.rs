@@ -4,16 +4,16 @@ use std::fmt::Display;
 use std::rc::Rc;
 
 use crate::ast::{
-    ConstructorDef, Expr_, Pattern_, StatementOrExpr_, Statement_, TypedExpr, TypedPattern,
-    TypedStatement, TypedStatements,
+    ConstructorDef, Expr_, Ident, Path, Pattern_, StatementOrExpr_, Statement_, TypedExpr,
+    TypedPattern, TypedStatement, TypedStatements,
 };
 use crate::error::EvalError;
-use crate::types::Type;
+use crate::types::{HashableType, Type};
 #[derive(Eq, PartialEq, Debug, Clone)]
 pub enum Value {
     VInt(i64),
     VBool(bool),
-    VFun(String, TypedExpr, Environment),
+    VFun(String, TypedExpr, ModuleEnv),
     VString(String),
     VUnit,
     VBuiltin(String, BuiltinFn, Vec<Value>, usize),
@@ -102,15 +102,15 @@ impl Environment {
             builtin: Environment::builtin(),
         }
     }
-    pub fn get(&self, name: &str) -> Result<Value, EvalError> {
-        match self.env.get(name) {
+    pub fn get(&self, ident: &Ident) -> Result<Value, EvalError> {
+        match self.env.get(&ident.name) {
             Some(value) => Ok(value.clone()),
             None => match &self.outer {
-                None => match self.builtin.get(name) {
+                None => match self.builtin.get(&ident.name) {
                     Some(value) => Ok(value.clone()),
-                    None => Err(EvalError::UndefinedVariable(name.to_owned())),
+                    None => Err(EvalError::UndefinedVariable(ident.name.to_owned())),
                 },
-                Some(env) => env.borrow().get(name),
+                Some(env) => env.borrow().get(&ident),
             },
         }
     }
@@ -225,29 +225,121 @@ impl Environment {
     }
 }
 
+#[derive(Eq, PartialEq, Debug, Clone)]
+pub struct ModuleEnv {
+    env: HashMap<Path, Rc<RefCell<Environment>>>,
+}
+
+impl ModuleEnv {
+    pub fn new() -> Self {
+        ModuleEnv {
+            env: Self::builtin(),
+        }
+    }
+
+    fn get(&self, ident: &Ident, current_path: &Path) -> Result<Value, EvalError> {
+        let path = match ident.path {
+            Some(ref path) => path,
+            None => current_path,
+        };
+
+        match self.env.get(path) {
+            Some(env) => env.borrow().get(&ident),
+            None => Err(EvalError::UndefinedVariable(ident.name.to_owned())),
+        }
+    }
+
+    fn get_module(&self, path: &Path) -> Result<Rc<RefCell<Environment>>, EvalError> {
+        match self.env.get(path) {
+            Some(env) => Ok(Rc::clone(env)),
+            None => Err(EvalError::ModuleNotFound(path.clone())),
+        }
+    }
+
+    fn new_enclosed_env(
+        env: Rc<RefCell<ModuleEnv>>,
+        current_path: &Path,
+    ) -> Result<Self, EvalError> {
+        let mut new_env = env.borrow().clone();
+        match new_env.env.get(current_path) {
+            Some(env) => {
+                new_env.env.insert(
+                    current_path.clone(),
+                    Rc::new(RefCell::new(Environment::new_enclosed_env(Rc::clone(env)))),
+                );
+            }
+            None => {
+                return Err(EvalError::ModuleNotFound(current_path.clone()));
+            }
+        }
+        Ok(new_env)
+    }
+    fn builtin() -> HashMap<Path, Rc<RefCell<Environment>>> {
+        let mut builtin: HashMap<Path, Rc<RefCell<Environment>>> = HashMap::new();
+
+        // ::main
+        builtin.insert(
+            Path::Module(Box::new(Path::Root), "main".to_owned()),
+            Rc::new(RefCell::new(Environment::new())),
+        );
+
+        // ::Vector[a]
+        let mut vector_env = Environment::new();
+        vector_env.insert(
+            "at".to_owned(),
+            Value::VBuiltin(
+                "at".to_owned(),
+                |values, _| match (&values[0], &values[1]) {
+                    (Value::VInt(n), Value::VVector(vec)) => Ok(vec[*n as usize].clone()),
+                    _ => Err(EvalError::InternalTypeError),
+                },
+                vec![],
+                2,
+            ),
+        );
+        builtin.insert(
+            Path::TypeModule(
+                Box::new(Path::Root),
+                HashableType::TVector(Box::new(HashableType::TQVar(0))),
+            ),
+            Rc::new(RefCell::new(vector_env)),
+        );
+        builtin
+    }
+}
+
 pub struct Eval {
-    env: Rc<RefCell<Environment>>,
+    env: Rc<RefCell<ModuleEnv>>,
     depth: usize,
     mode: Mode,
     pub stdout: Rc<RefCell<String>>,
+    current_path: Path,
 }
 
 impl Eval {
     pub fn new(mode: Mode) -> Eval {
-        let env = Environment::new();
+        let env = ModuleEnv::new();
         Eval {
             env: Rc::new(RefCell::new(env)),
             depth: 0,
             mode,
             stdout: Rc::new(RefCell::new("".to_owned())),
+            current_path: Path::Module(Box::new(Path::Root), "main".to_owned()),
         }
     }
-    fn from(env: Environment, depth: usize, mode: Mode, stdout: &Rc<RefCell<String>>) -> Eval {
+    fn from(
+        env: ModuleEnv,
+        depth: usize,
+        mode: Mode,
+        stdout: &Rc<RefCell<String>>,
+        current_path: Path,
+    ) -> Eval {
         Eval {
             env: Rc::new(RefCell::new(env)),
             depth,
             mode,
             stdout: Rc::clone(stdout),
+            current_path,
         }
     }
     pub fn eval_expr(&self, ast: TypedExpr) -> Result<Value, EvalError> {
@@ -289,11 +381,11 @@ impl Eval {
                     _ => Err(EvalError::InternalTypeError),
                 }
             }
-            Expr_::EVar(ident) => self.env.borrow().get(&ident),
+            Expr_::EVar(ident) => self.env.borrow().get(&ident, &self.current_path),
             Expr_::EFun(arg, e) => Ok(Value::VFun(
                 arg,
                 *e,
-                Environment::new_enclosed_env(Rc::clone(&self.env)),
+                ModuleEnv::new_enclosed_env(Rc::clone(&self.env), &self.current_path)?,
             )),
             Expr_::EFunApp(e1, e2) => {
                 let v1 = self.eval_expr(*e1)?;
@@ -304,10 +396,11 @@ impl Eval {
             Expr_::EUnit => Ok(Value::VUnit),
             Expr_::EBlockExpr(asts) => {
                 let eval = Eval::from(
-                    Environment::new_enclosed_env(Rc::clone(&self.env)),
+                    ModuleEnv::new_enclosed_env(Rc::clone(&self.env), &self.current_path)?,
                     self.depth,
                     self.mode,
                     &self.stdout,
+                    self.current_path.clone(),
                 );
                 if asts.len() > 1 {
                     for i in 0..(asts.len() - 1) {
@@ -321,7 +414,7 @@ impl Eval {
                 }
                 match &asts[asts.len() - 1].inner {
                     StatementOrExpr_::Statement(stmt) => {
-                        self.eval_statement(stmt.clone())?;
+                        eval.eval_statement(stmt.clone())?;
                         Ok(Value::VUnit)
                     }
                     StatementOrExpr_::Expr(e) => eval.eval_expr(e.clone()),
@@ -359,10 +452,11 @@ impl Eval {
                 let expr = self.eval_expr(*expr)?;
                 for (pattern, expr_arm) in match_arms {
                     let eval = Eval::from(
-                        Environment::new_enclosed_env(Rc::clone(&self.env)),
+                        ModuleEnv::new_enclosed_env(Rc::clone(&self.env), &self.current_path)?,
                         self.depth,
                         self.mode,
                         &self.stdout,
+                        self.current_path.clone(),
                     );
                     if eval.expr_match_pattern(&expr, &pattern)? == true {
                         return eval.eval_expr(expr_arm);
@@ -371,7 +465,7 @@ impl Eval {
                 Err(EvalError::NotMatchAnyPattern)
             }
             Expr_::EMethod(receiver, ident, args) => {
-                let mut result = self.env.borrow().get(&ident)?;
+                let mut result = self.env.borrow().get(&ident, &self.current_path)?;
                 for arg in args {
                     result = self.fun_app_helper(result, self.eval_expr(arg)?)?;
                 }
@@ -387,7 +481,7 @@ impl Eval {
             }
             Pattern_::PConstructor(name, patterns) => {
                 if let Value::VConstructor(constructor_name, args, _) = expr {
-                    if constructor_name != name {
+                    if constructor_name != &name.name {
                         return Ok(false);
                     } else if patterns.len() != args.len() {
                         return Err(EvalError::InternalTypeError);
@@ -402,7 +496,11 @@ impl Eval {
                 }
             }
             Pattern_::PVar(var_name) => {
-                self.env.borrow_mut().insert(var_name.clone(), expr.clone());
+                self.env
+                    .borrow()
+                    .get_module(&self.current_path)?
+                    .borrow_mut()
+                    .insert(var_name.clone(), expr.clone());
                 Ok(true)
             }
         }
@@ -411,14 +509,23 @@ impl Eval {
         match ast.inner {
             Statement_::Assign(name, _, e) => {
                 let val = self.eval_expr(e)?;
-                Ok(self.env.borrow_mut().insert(name, val))
+                Ok(self
+                    .env
+                    .borrow()
+                    .get_module(&self.current_path)?
+                    .borrow_mut()
+                    .insert(name, val))
             }
             Statement_::TypeDef(_, constructor_def_vec) => {
                 for ConstructorDef { name, args } in &constructor_def_vec {
-                    self.env.borrow_mut().insert(
-                        name.to_owned(),
-                        Value::VConstructor(name.to_owned(), vec![], args.len()),
-                    )
+                    self.env
+                        .borrow()
+                        .get_module(&self.current_path)?
+                        .borrow_mut()
+                        .insert(
+                            name.to_owned(),
+                            Value::VConstructor(name.to_owned(), vec![], args.len()),
+                        )
                 }
                 Ok(())
             }
@@ -431,7 +538,14 @@ impl Eval {
         Ok(())
     }
     pub fn eval_main(&self) -> Result<Value, EvalError> {
-        self.env.borrow().get("main")
+        self.env
+            .borrow()
+            .get_module(&Path::Module(Box::new(Path::Root), "main".to_owned()))?
+            .borrow()
+            .get(&Ident {
+                path: Some(Path::Module(Box::new(Path::Root), "main".to_owned())),
+                name: "main".to_owned(),
+            })
     }
     fn fun_app_helper(&self, v1: Value, v2: Value) -> Result<Value, EvalError> {
         match v1 {
@@ -439,8 +553,32 @@ impl Eval {
                 if self.mode == Mode::Playground && self.depth >= 29 {
                     return Err(EvalError::RecursionLimitExceeded);
                 }
-                let eval = Eval::from(env, self.depth + 1, self.mode, &self.stdout);
-                eval.env.borrow_mut().insert(arg, v2);
+                dbg!(env.get(
+                    &Ident {
+                        path: None,
+                        name: "n".to_owned()
+                    },
+                    &self.current_path
+                ));
+                let eval = Eval::from(
+                    env.clone(),
+                    self.depth + 1,
+                    self.mode,
+                    &self.stdout,
+                    self.current_path.clone(),
+                );
+                eval.env
+                    .borrow()
+                    .get_module(&self.current_path)?
+                    .borrow_mut()
+                    .insert(arg, v2);
+                dbg!(env.get(
+                    &Ident {
+                        path: None,
+                        name: "n".to_owned()
+                    },
+                    &self.current_path
+                ));
                 eval.eval_expr(expr)
             }
             Value::VBuiltin(name, fun, args, args_num) => {
@@ -454,6 +592,7 @@ impl Eval {
                             depth: self.depth + 1,
                             mode: self.mode,
                             stdout: Rc::clone(&self.stdout),
+                            current_path: self.current_path.clone(),
                         },
                     )
                 } else {
@@ -482,7 +621,7 @@ mod tests {
         assert_eq!(
             eval.eval_expr(
                 typeinfer
-                    .typeinfer_expr(&parser_expr(str).unwrap().1)
+                    .typeinfer_expr(&parser_expr(str).unwrap().1, None)
                     .unwrap()
             ),
             v

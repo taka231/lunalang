@@ -1,4 +1,4 @@
-use crate::types::Type;
+use crate::types::{HashableType, Type};
 
 #[derive(PartialEq, Eq, Debug, Clone)]
 pub enum Expr_<Ty, Span> {
@@ -10,7 +10,7 @@ pub enum Expr_<Ty, Span> {
         Box<Expr<Ty, Span>>,
         Box<Expr<Ty, Span>>,
     ),
-    EVar(String),
+    EVar(Ident),
     EFun(String, Box<Expr<Ty, Span>>),
     EFunApp(Box<Expr<Ty, Span>>, Box<Expr<Ty, Span>>),
     EString(String),
@@ -21,7 +21,20 @@ pub enum Expr_<Ty, Span> {
         Box<Expr<Ty, Span>>,
         Vec<(Pattern<Ty, Span>, Expr<Ty, Span>)>,
     ),
-    EMethod(Box<Expr<Ty, Span>>, String, Vec<Expr<Ty, Span>>),
+    EMethod(Box<Expr<Ty, Span>>, Ident, Vec<Expr<Ty, Span>>),
+}
+
+#[derive(PartialEq, Eq, Debug, Clone, Hash)]
+pub enum Path {
+    Root,
+    Module(Box<Path>, String),
+    TypeModule(Box<Path>, HashableType),
+}
+
+#[derive(PartialEq, Eq, Debug, Clone)]
+pub struct Ident {
+    pub path: Option<Path>,
+    pub name: String,
 }
 
 pub type Expr<Ty, Span> = Annot<Ty, Span, Expr_<Ty, Span>>;
@@ -70,7 +83,10 @@ impl UntypedExpr {
         Annot {
             ty: (),
             span: (),
-            inner: Expr_::EVar(str.to_string()),
+            inner: Expr_::EVar(Ident {
+                path: None,
+                name: str.to_owned(),
+            }),
         }
     }
 
@@ -122,7 +138,14 @@ impl UntypedExpr {
         Annot {
             ty: (),
             span: (),
-            inner: Expr_::EMethod(Box::new(receiver), ident.to_string(), args),
+            inner: Expr_::EMethod(
+                Box::new(receiver),
+                Ident {
+                    path: None,
+                    name: ident.to_owned(),
+                },
+                args,
+            ),
         }
     }
 }
@@ -139,7 +162,7 @@ pub struct Annot<Ty, Span, Inner> {
 #[derive(PartialEq, Eq, Debug, Clone)]
 pub enum Pattern_<Ty, Span> {
     PValue(Expr<Ty, Span>),
-    PConstructor(String, Vec<Pattern<Ty, Span>>),
+    PConstructor(Ident, Vec<Pattern<Ty, Span>>),
     PVar(String),
 }
 
@@ -159,7 +182,13 @@ impl UntypedPattern {
         Annot {
             ty: (),
             span: (),
-            inner: Pattern_::PConstructor(name.to_string(), v),
+            inner: Pattern_::PConstructor(
+                Ident {
+                    path: None,
+                    name: name.to_string(),
+                },
+                v,
+            ),
         }
     }
     pub fn p_var(name: &str) -> Self {
