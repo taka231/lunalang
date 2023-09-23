@@ -651,7 +651,6 @@ impl TypeInfer {
                             .collect::<Vec<_>>(),
                     ));
                 }
-                dbg!(&candidate);
                 let fun_type = &candidate[0].1;
                 unify(fun_type, &ty)?;
                 Ok(Annot {

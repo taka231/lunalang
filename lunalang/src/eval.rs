@@ -13,7 +13,7 @@ use crate::types::{HashableType, Type};
 pub enum Value {
     VInt(i64),
     VBool(bool),
-    VFun(String, TypedExpr, ModuleEnv),
+    VFun(String, TypedExpr, Environment),
     VString(String),
     VUnit,
     VBuiltin(String, BuiltinFn, Vec<Value>, usize),
@@ -274,6 +274,19 @@ impl ModuleEnv {
         }
         Ok(new_env)
     }
+
+    fn new_envclosed_env_from_environment(
+        env: Rc<RefCell<ModuleEnv>>,
+        current_path: &Path,
+        environment: Environment,
+    ) -> Result<Self, EvalError> {
+        let mut new_env = env.borrow().clone();
+        new_env
+            .env
+            .insert(current_path.clone(), Rc::new(RefCell::new(environment)));
+        Ok(new_env)
+    }
+
     fn builtin() -> HashMap<Path, Rc<RefCell<Environment>>> {
         let mut builtin: HashMap<Path, Rc<RefCell<Environment>>> = HashMap::new();
 
@@ -385,7 +398,7 @@ impl Eval {
             Expr_::EFun(arg, e) => Ok(Value::VFun(
                 arg,
                 *e,
-                ModuleEnv::new_enclosed_env(Rc::clone(&self.env), &self.current_path)?,
+                Environment::new_enclosed_env(self.env.borrow().get_module(&self.current_path)?),
             )),
             Expr_::EFunApp(e1, e2) => {
                 let v1 = self.eval_expr(*e1)?;
@@ -553,15 +566,12 @@ impl Eval {
                 if self.mode == Mode::Playground && self.depth >= 29 {
                     return Err(EvalError::RecursionLimitExceeded);
                 }
-                dbg!(env.get(
-                    &Ident {
-                        path: None,
-                        name: "n".to_owned()
-                    },
-                    &self.current_path
-                ));
                 let eval = Eval::from(
-                    env.clone(),
+                    ModuleEnv::new_envclosed_env_from_environment(
+                        Rc::clone(&self.env),
+                        &self.current_path,
+                        env.clone(),
+                    )?,
                     self.depth + 1,
                     self.mode,
                     &self.stdout,
@@ -572,14 +582,8 @@ impl Eval {
                     .get_module(&self.current_path)?
                     .borrow_mut()
                     .insert(arg, v2);
-                dbg!(env.get(
-                    &Ident {
-                        path: None,
-                        name: "n".to_owned()
-                    },
-                    &self.current_path
-                ));
-                eval.eval_expr(expr)
+                let result = eval.eval_expr(expr);
+                result
             }
             Value::VBuiltin(name, fun, args, args_num) => {
                 let mut args_mut = args;
