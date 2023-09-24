@@ -20,6 +20,7 @@ pub enum Value {
     VVector(Vec<Value>),
     VConstructor(String, Vec<Value>, usize),
     VRef(Rc<RefCell<Value>>),
+    VChar(char),
 }
 
 impl Display for Value {
@@ -75,6 +76,7 @@ impl Display for Value {
                 }
                 write!(f, "]>")
             }
+            Value::VChar(c) => write!(f, "{}", c),
         }
     }
 }
@@ -316,6 +318,30 @@ impl ModuleEnv {
                 HashableType::TVector(Box::new(HashableType::TQVar(0))),
             ),
             Rc::new(RefCell::new(vector_env)),
+        );
+
+        // ::String
+        let mut string_env = Environment::new();
+        string_env.insert(
+            "at".to_owned(),
+            Value::VBuiltin(
+                "at".to_owned(),
+                |values, _| match (&values[0], &values[1]) {
+                    (Value::VInt(n), Value::VString(str)) => {
+                        Ok(Value::VChar(str.chars().nth(*n as usize).unwrap()))
+                    }
+                    _ => Err(EvalError::InternalTypeError),
+                },
+                vec![],
+                2,
+            ),
+        );
+        builtin.insert(
+            Path::TypeModule(
+                Box::new(Path::Root),
+                HashableType::TType("String".to_owned()),
+            ),
+            Rc::new(RefCell::new(string_env)),
         );
         builtin
     }
