@@ -2,8 +2,8 @@ use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use crate::{
     ast::{
-        ConstructorDef, UntypedExpr, UntypedPattern, UntypedStatement, UntypedStatementOrExpr,
-        UntypedStatements,
+        ConstructorDef, Ident, UntypedExpr, UntypedPattern, UntypedStatement,
+        UntypedStatementOrExpr, UntypedStatements,
     },
     types::Type,
 };
@@ -67,7 +67,7 @@ pub fn op(input: &str) -> IResult<&str, String> {
 }
 
 pub fn term(input: &str) -> IResult<&str, UntypedExpr> {
-    alt((expr_if, for_in_expr, lambda_fn, dot_expr, simple_term))(input)
+    alt((expr_if, for_in_expr, lambda_fn, parser_index_access))(input)
 }
 
 pub fn simple_term(input: &str) -> IResult<&str, UntypedExpr> {
@@ -90,6 +90,25 @@ pub fn parser_unit(input: &str) -> IResult<&str, UntypedExpr> {
     let (input, _) = symbol("(")(input)?;
     let (input, _) = symbol(")")(input)?;
     Ok((input, UntypedExpr::e_unit()))
+}
+
+pub fn parser_index_access(input: &str) -> IResult<&str, UntypedExpr> {
+    let (input, e) = dot_expr(input)?;
+    let (input, index) = many0(|input| {
+        let (input, _) = symbol("[")(input)?;
+        let (input, index) = parser_expr(input)?;
+        let (input, _) = symbol("]")(input)?;
+        Ok((input, index))
+    })(input)?;
+    match index.len() {
+        0 => Ok((input, e)),
+        _ => Ok((
+            input,
+            index.iter().fold(e, |acc, index| {
+                UntypedExpr::e_method(acc, "at", vec![index.clone()])
+            }),
+        )),
+    }
 }
 
 pub fn block_term(input: &str) -> IResult<&str, UntypedExpr> {
