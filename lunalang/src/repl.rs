@@ -63,7 +63,7 @@ pub fn repl() {
         let ast = parser_for_repl(&repl.program);
         match ast.map(|e| (e.0, e.1.inner)) {
             Ok((_, StatementOrExpr_::Expr(ast))) => {
-                let ast = repl.typeinfer.typeinfer_expr(&ast);
+                let ast = repl.typeinfer.typeinfer_expr(&ast, None);
                 if let Err(err) = ast {
                     println!("{}", err);
                     continue;
@@ -74,7 +74,7 @@ pub fn repl() {
                 }
                 let result = repl.eval.eval_expr(ast.unwrap());
                 match result {
-                    Ok(e) => println!("{:?}", e),
+                    Ok(e) => println!("{}", e),
                     Err(err) => println!("{}", err),
                 }
             }

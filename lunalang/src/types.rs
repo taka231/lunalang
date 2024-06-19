@@ -15,6 +15,74 @@ pub enum Type {
     TVariant(Vec<(String, Vec<Type>)>),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum HashableType {
+    TType(String),
+    TFun(Box<HashableType>, Box<HashableType>),
+    TQVar(u64),
+    TRecVar(u64),
+    TRec(Box<HashableType>),
+    TVector(Box<HashableType>),
+    TRef(Box<HashableType>),
+    TVariant(Vec<(String, Vec<HashableType>)>),
+}
+
+impl From<&Type> for HashableType {
+    fn from(ty: &Type) -> Self {
+        match ty.simplify() {
+            Type::TType(ty) => HashableType::TType(ty),
+            Type::TFun(t1, t2) => HashableType::TFun(
+                Box::new(HashableType::from(&*t1)),
+                Box::new(HashableType::from(&*t2)),
+            ),
+            Type::TQVar(n) => HashableType::TQVar(n),
+            Type::TRecVar(n) => HashableType::TRecVar(n),
+            Type::TRec(t) => HashableType::TRec(Box::new(HashableType::from(&*t))),
+            Type::TVector(t) => HashableType::TVector(Box::new(HashableType::from(&*t))),
+            Type::TRef(t) => HashableType::TRef(Box::new(HashableType::from(&*t))),
+            Type::TVariant(variants) => HashableType::TVariant(
+                variants
+                    .iter()
+                    .map(|(name, tys)| {
+                        (
+                            name.to_owned(),
+                            tys.iter().map(|ty| HashableType::from(ty)).collect(),
+                        )
+                    })
+                    .collect(),
+            ),
+            Type::TVar(_, _, _) => unreachable!(),
+        }
+    }
+}
+
+impl From<HashableType> for Type {
+    fn from(value: HashableType) -> Self {
+        match value {
+            HashableType::TType(ty) => Type::TType(ty.to_owned()),
+            HashableType::TFun(ty1, ty2) => {
+                Type::TFun(Box::new(Type::from(*ty1)), Box::new(Type::from(*ty2)))
+            }
+            HashableType::TQVar(n) => Type::TQVar(n),
+            HashableType::TRecVar(n) => Type::TRecVar(n),
+            HashableType::TRec(ty) => Type::TRec(Box::new(Type::from(*ty))),
+            HashableType::TVector(ty) => Type::TVector(Box::new(Type::from(*ty))),
+            HashableType::TRef(ty) => Type::TRef(Box::new(Type::from(*ty))),
+            HashableType::TVariant(variants) => Type::TVariant(
+                variants
+                    .iter()
+                    .map(|(name, tys)| {
+                        (
+                            name.to_owned(),
+                            tys.iter().map(|ty| Type::from(ty.clone())).collect(),
+                        )
+                    })
+                    .collect(),
+            ),
+        }
+    }
+}
+
 impl Type {
     pub fn ttype(ty: impl Into<String>) -> Type {
         Type::TType(ty.into())
@@ -126,6 +194,30 @@ impl Type {
             }
         }
         (args, ty)
+    }
+    pub fn reset(&self) {
+        match self {
+            Type::TType(_) => (),
+            Type::TFun(ty1, ty2) => {
+                ty1.reset();
+                ty2.reset();
+            }
+            Type::TVar(_, _, r) => {
+                *r.borrow_mut() = None;
+            }
+            Type::TQVar(_) => (),
+            Type::TRecVar(_) => (),
+            Type::TRec(ty) => ty.reset(),
+            Type::TVector(ty) => ty.reset(),
+            Type::TRef(ty) => ty.reset(),
+            Type::TVariant(variants) => {
+                for (_, tys) in variants {
+                    for ty in tys {
+                        ty.reset();
+                    }
+                }
+            }
+        }
     }
 }
 

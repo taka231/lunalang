@@ -1,7 +1,9 @@
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
+
 use crate::{
     ast::{
-        ConstructorDef, UntypedExpr, UntypedPattern, UntypedStatement, UntypedStatementOrExpr,
-        UntypedStatements,
+        ConstructorDef, Ident, UntypedExpr, UntypedPattern, UntypedStatement,
+        UntypedStatementOrExpr, UntypedStatements,
     },
     types::Type,
 };
@@ -65,7 +67,7 @@ pub fn op(input: &str) -> IResult<&str, String> {
 }
 
 pub fn term(input: &str) -> IResult<&str, UntypedExpr> {
-    alt((expr_if, for_in_expr, lambda_fn, dot_expr, simple_term))(input)
+    alt((expr_if, for_in_expr, lambda_fn, parser_index_access))(input)
 }
 
 pub fn simple_term(input: &str) -> IResult<&str, UntypedExpr> {
@@ -88,6 +90,25 @@ pub fn parser_unit(input: &str) -> IResult<&str, UntypedExpr> {
     let (input, _) = symbol("(")(input)?;
     let (input, _) = symbol(")")(input)?;
     Ok((input, UntypedExpr::e_unit()))
+}
+
+pub fn parser_index_access(input: &str) -> IResult<&str, UntypedExpr> {
+    let (input, e) = dot_expr(input)?;
+    let (input, index) = many0(|input| {
+        let (input, _) = symbol("[")(input)?;
+        let (input, index) = parser_expr(input)?;
+        let (input, _) = symbol("]")(input)?;
+        Ok((input, index))
+    })(input)?;
+    match index.len() {
+        0 => Ok((input, e)),
+        _ => Ok((
+            input,
+            index.iter().fold(e, |acc, index| {
+                UntypedExpr::e_method(acc, "at", vec![index.clone()])
+            }),
+        )),
+    }
 }
 
 pub fn block_term(input: &str) -> IResult<&str, UntypedExpr> {
@@ -231,13 +252,20 @@ fn parse_block_expr(input: &str) -> IResult<&str, UntypedExpr> {
 pub fn statement_assign(input: &str) -> IResult<&str, UntypedStatement> {
     let (input, _) = keyword("let")(input)?;
     let (input, id) = identifier(input)?;
+    let (input, ty) = opt(|input| {
+        let type_map = Rc::new(RefCell::new(HashMap::new()));
+        let (input, _) = symbol(":")(input)?;
+        let (input, ty) = parser_type_init(input, type_map)?;
+        Ok((input, ty))
+    })(input)?;
     let (input, _) = symbol("=")(input)?;
     let (input, e) = parser_expr(input)?;
     let (input, _) = symbol(";")(input)?;
-    Ok((input, UntypedStatement::assign(&id, e)))
+    Ok((input, UntypedStatement::assign(&id, ty, e)))
 }
 
 pub fn statement_typedef(input: &str) -> IResult<&str, UntypedStatement> {
+    let type_map = Rc::new(RefCell::new(HashMap::new()));
     let (input, _) = keyword("enum")(input)?;
     let (input, id) = identifier_start_with_capital(input)?;
     let (input, _) = symbol("{")(input)?;
@@ -245,7 +273,9 @@ pub fn statement_typedef(input: &str) -> IResult<&str, UntypedStatement> {
         let (input, name) = identifier_start_with_capital(input)?;
         let (input, args) = opt(|input| {
             let (input, _) = symbol("(")(input)?;
-            let (input, args) = separated_list0(symbol(","), parser_type_init)(input)?;
+            let (input, args) = separated_list0(symbol(","), |input| {
+                parser_type_init(input, Rc::clone(&type_map))
+            })(input)?;
             let (input, _) = symbol(")")(input)?;
             Ok((input, args))
         })(input)?;
@@ -259,15 +289,17 @@ pub fn statement_typedef(input: &str) -> IResult<&str, UntypedStatement> {
     Ok((input, UntypedStatement::type_def(&id, constructors)))
 }
 
-pub fn parser_type_init(input: &str) -> IResult<&str, Type> {
-    parser_fun_type(input)
+type TypeMap = Rc<RefCell<HashMap<String, Type>>>;
+
+pub fn parser_type_init(input: &str, type_map: TypeMap) -> IResult<&str, Type> {
+    parser_fun_type(input, type_map)
 }
 
-pub fn parser_fun_type(input: &str) -> IResult<&str, Type> {
-    let (input, t1) = parser_type(input)?;
+pub fn parser_fun_type(input: &str, type_map: TypeMap) -> IResult<&str, Type> {
+    let (input, t1) = parser_type(input, Rc::clone(&type_map))?;
     let (input, t2) = opt(|input| {
         let (input, _) = symbol("->")(input)?;
-        let (input, t2) = parser_fun_type(input)?;
+        let (input, t2) = parser_fun_type(input, Rc::clone(&type_map))?;
         Ok((input, t2))
     })(input)?;
     match t2 {
@@ -276,13 +308,18 @@ pub fn parser_fun_type(input: &str) -> IResult<&str, Type> {
     }
 }
 
-pub fn parser_type(input: &str) -> IResult<&str, Type> {
+pub fn parser_type(input: &str, type_map: TypeMap) -> IResult<&str, Type> {
     alt((
-        delimited(symbol("("), parser_type_init, symbol(")")),
-        parser_ref_type,
-        parser_vector_type,
+        delimited(
+            symbol("("),
+            |input| parser_type_init(input, Rc::clone(&type_map)),
+            symbol(")"),
+        ),
+        |input| parser_ref_type(input, Rc::clone(&type_map)),
+        |input| parser_vector_type(input, Rc::clone(&type_map)),
         parser_simple_type,
         parser_unit_type,
+        |input| parser_generic_type(input, Rc::clone(&type_map)),
     ))(input)
 }
 
@@ -291,33 +328,70 @@ pub fn parser_simple_type(input: &str) -> IResult<&str, Type> {
     Ok((input, Type::TType(id)))
 }
 
+pub fn parser_generic_type(input: &str, type_map: TypeMap) -> IResult<&str, Type> {
+    let (input, ty_name) = identifier(input)?;
+    let mut type_map = type_map.borrow_mut();
+    match type_map.get(&ty_name) {
+        Some(ty) => Ok((input, ty.clone())),
+        None => {
+            let ty = Type::TQVar(type_map.len() as u64);
+            type_map.insert(ty_name, ty.clone());
+            Ok((input, ty))
+        }
+    }
+}
+
 pub fn parser_unit_type(input: &str) -> IResult<&str, Type> {
     let (input, _) = symbol("()")(input)?;
     Ok((input, Type::TType("()".to_owned())))
 }
 
-pub fn parser_ref_type(input: &str) -> IResult<&str, Type> {
+pub fn parser_ref_type(input: &str, type_map: TypeMap) -> IResult<&str, Type> {
     let (input, _) = symbol("Ref")(input)?;
     let (input, _) = symbol("[")(input)?;
-    let (input, ty) = parser_type_init(input)?;
+    let (input, ty) = parser_type_init(input, type_map)?;
     let (input, _) = symbol("]")(input)?;
     Ok((input, Type::TRef(Box::new(ty))))
 }
 
-pub fn parser_vector_type(input: &str) -> IResult<&str, Type> {
+pub fn parser_vector_type(input: &str, type_map: TypeMap) -> IResult<&str, Type> {
     let (input, _) = symbol("Vector")(input)?;
     let (input, _) = symbol("[")(input)?;
-    let (input, ty) = parser_type_init(input)?;
+    let (input, ty) = parser_type_init(input, type_map)?;
     let (input, _) = symbol("]")(input)?;
     Ok((input, Type::TVector(Box::new(ty))))
 }
 
 pub fn fun_def(input: &str) -> IResult<&str, UntypedStatement> {
+    let type_map: TypeMap = Rc::new(RefCell::new(HashMap::new()));
     let (input, _) = keyword("let")(input)?;
     let (input, id) = identifier(input)?;
     let (input, _) = symbol("(")(input)?;
-    let (input, args) = separated_list0(symbol(","), identifier)(input)?;
-    let (input, _) = symbol(")")(input)?;
+    let (input, (args, ty)) = alt((
+        |input| {
+            let (input, args) = separated_list0(symbol(","), identifier)(input)?;
+            let (input, _) = symbol(")")(input)?;
+            Ok((input, (args, None)))
+        },
+        |input| {
+            let (input, args) = separated_list0(symbol(","), |input| {
+                let (input, id) = identifier(input)?;
+                let (input, _) = symbol(":")(input)?;
+                let (input, ty) = parser_type_init(input, Rc::clone(&type_map))?;
+                Ok((input, (id, ty)))
+            })(input)?;
+            let (input, _) = symbol(")")(input)?;
+            let (input, _) = symbol(":")(input)?;
+            let (input, mut result_ty) = parser_type_init(input, Rc::clone(&type_map))?;
+            for (_, ty) in args.iter().rev() {
+                result_ty = Type::TFun(Box::new(ty.clone()), Box::new(result_ty))
+            }
+            Ok((
+                input,
+                (args.iter().map(|x| x.0.clone()).collect(), Some(result_ty)),
+            ))
+        },
+    ))(input)?;
     let (input, _) = symbol("=")(input)?;
     let (input, expr) = parser_expr(input)?;
     let (input, _) = symbol(";")(input)?;
@@ -325,7 +399,7 @@ pub fn fun_def(input: &str) -> IResult<&str, UntypedStatement> {
     for i in (0..args.len()).rev() {
         result = UntypedExpr::e_fun(&args[i], result)
     }
-    Ok((input, UntypedStatement::assign(&id, result)))
+    Ok((input, UntypedStatement::assign(&id, ty, result)))
 }
 
 fn identifier(input: &str) -> IResult<&str, String> {
@@ -415,11 +489,7 @@ pub fn dot_expr(input: &str) -> IResult<&str, UntypedExpr> {
             Ok((input, args))
         })(input)?;
         let args = args.unwrap_or(vec![]);
-        let mut temp_expr = UntypedExpr::e_var(&ident);
-        for arg in args {
-            temp_expr = UntypedExpr::fun_app(temp_expr, arg);
-        }
-        Ok((input, temp_expr))
+        Ok((input, (ident, args)))
     })(input)?;
     let (input, opt_expr) = opt(block_term)(input)?;
     match opt_expr {
@@ -429,11 +499,11 @@ pub fn dot_expr(input: &str) -> IResult<&str, UntypedExpr> {
                 return Ok((input, UntypedExpr::fun_app(expr, e)));
             }
             let len = temp_exprs.len();
-            temp_exprs[len - 1] = UntypedExpr::fun_app(temp_exprs[len - 1].clone(), e)
+            temp_exprs[len - 1].1.push(e);
         }
     }
-    for temp_expr in temp_exprs {
-        expr = UntypedExpr::fun_app(temp_expr, expr)
+    for (ident, args) in temp_exprs {
+        expr = UntypedExpr::e_method(expr, &ident, args)
     }
     Ok((input, expr))
 }
@@ -699,6 +769,21 @@ mod tests {
                 )
             ))
         );
+        assert_eq!(
+            parser_expr("if (1 < 2) 1 else if (2 < 3) 2 else 3"),
+            Ok((
+                "",
+                UntypedExpr::e_if(
+                    UntypedExpr::bin_op("<", UntypedExpr::e_int(1), UntypedExpr::e_int(2)),
+                    UntypedExpr::e_int(1),
+                    UntypedExpr::e_if(
+                        UntypedExpr::bin_op("<", UntypedExpr::e_int(2), UntypedExpr::e_int(3)),
+                        UntypedExpr::e_int(2),
+                        UntypedExpr::e_int(3),
+                    ),
+                ),
+            )),
+        );
     }
 
     #[test]
@@ -784,6 +869,7 @@ mod tests {
                 UntypedExpr::e_block_expr(vec![
                     UntypedStatementOrExpr::statement(UntypedStatement::assign(
                         "x",
+                        None,
                         UntypedExpr::e_int(1)
                     )),
                     UntypedStatementOrExpr::expr(UntypedExpr::bin_op(
@@ -806,6 +892,7 @@ mod tests {
                 UntypedExpr::e_block_expr(vec![
                     UntypedStatementOrExpr::statement(UntypedStatement::assign(
                         "x",
+                        None,
                         UntypedExpr::e_int(1)
                     )),
                     UntypedStatementOrExpr::expr(UntypedExpr::bin_op(
@@ -822,7 +909,10 @@ mod tests {
     fn test_assign_statement() {
         assert_eq!(
             statement_assign("let a = 1;"),
-            Ok(("", UntypedStatement::assign("a", UntypedExpr::e_int(1))))
+            Ok((
+                "",
+                UntypedStatement::assign("a", None, UntypedExpr::e_int(1))
+            ))
         );
     }
 
@@ -855,11 +945,11 @@ mod tests {
     #[test]
     fn test_parser_type() {
         assert_eq!(
-            parser_type_init("Int"),
+            parser_type_init("Int", Rc::new(RefCell::new(HashMap::new()))),
             Ok(("", Type::TType("Int".to_owned())))
         );
         assert_eq!(
-            parser_type_init("Int -> Int"),
+            parser_type_init("Int -> Int", Rc::new(RefCell::new(HashMap::new()))),
             Ok((
                 "",
                 Type::TFun(
@@ -869,7 +959,7 @@ mod tests {
             ))
         );
         assert_eq!(
-            parser_type_init("Int -> Bool -> Int"),
+            parser_type_init("Int -> Bool -> Int", Rc::new(RefCell::new(HashMap::new()))),
             Ok((
                 "",
                 Type::TFun(
@@ -882,25 +972,32 @@ mod tests {
             ))
         );
         assert_eq!(
-            parser_type_init("()"),
+            parser_type_init("()", Rc::new(RefCell::new(HashMap::new()))),
             Ok(("", Type::TType("()".to_owned())))
         );
         assert_eq!(
-            parser_type_init("Ref[Int]"),
+            parser_type_init("Ref[Int]", Rc::new(RefCell::new(HashMap::new()))),
             Ok(("", Type::TRef(Box::new(Type::TType("Int".to_owned())))))
         );
         assert_eq!(
-            parser_type_init("Vector[Bool]"),
+            parser_type_init("Vector[Bool]", Rc::new(RefCell::new(HashMap::new()))),
             Ok(("", Type::TVector(Box::new(Type::TType("Bool".to_owned())))))
         );
         assert_eq!(
-            parser_type_init("(Int -> Int)"),
+            parser_type_init("(Int -> Int)", Rc::new(RefCell::new(HashMap::new()))),
             Ok((
                 "",
                 Type::TFun(
                     Box::new(Type::TType("Int".to_owned())),
                     Box::new(Type::TType("Int".to_owned())),
                 )
+            ))
+        );
+        assert_eq!(
+            parser_type_init("a -> a", Rc::new(RefCell::new(HashMap::new()))),
+            Ok((
+                "",
+                Type::TFun(Box::new(Type::TQVar(0)), Box::new(Type::TQVar(0)))
             ))
         );
     }
@@ -913,6 +1010,7 @@ mod tests {
                 "",
                 UntypedStatement::assign(
                     "add",
+                    None,
                     UntypedExpr::e_fun(
                         "a",
                         UntypedExpr::e_fun(
@@ -926,7 +1024,21 @@ mod tests {
                     )
                 )
             ))
-        )
+        );
+        assert_eq!(
+            fun_def("let id(x: a): a = x;"),
+            Ok((
+                "",
+                UntypedStatement::assign(
+                    "id",
+                    Some(Type::TFun(
+                        Box::new(Type::TQVar(0)),
+                        Box::new(Type::TQVar(0))
+                    )),
+                    UntypedExpr::e_fun("x", UntypedExpr::e_var("x"))
+                )
+            ))
+        );
     }
 
     #[test]
@@ -944,7 +1056,10 @@ mod tests {
     pub fn test_parser_statement() {
         assert_eq!(
             parser_statement("let main = 1;"),
-            Ok(("", UntypedStatement::assign("main", UntypedExpr::e_int(1)))),
+            Ok((
+                "",
+                UntypedStatement::assign("main", None, UntypedExpr::e_int(1))
+            )),
         );
         assert_eq!(
             parser_statement("let add(a, b) = a + b;"),
@@ -952,6 +1067,7 @@ mod tests {
                 "",
                 UntypedStatement::assign(
                     "add",
+                    None,
                     UntypedExpr::e_fun(
                         "a",
                         UntypedExpr::e_fun(
@@ -974,7 +1090,11 @@ mod tests {
             parser_statements("let main = 1;"),
             Ok((
                 "",
-                vec![UntypedStatement::assign("main", UntypedExpr::e_int(1))]
+                vec![UntypedStatement::assign(
+                    "main",
+                    None,
+                    UntypedExpr::e_int(1)
+                )]
             ))
         );
         assert_eq!(
@@ -983,6 +1103,7 @@ mod tests {
                 "",
                 vec![UntypedStatement::assign(
                     "main",
+                    None,
                     UntypedExpr::bin_op("+", UntypedExpr::e_var("a"), UntypedExpr::e_var("b"))
                 ),]
             ))
@@ -992,8 +1113,8 @@ mod tests {
             Ok((
                 "",
                 vec![
-                    UntypedStatement::assign("a", UntypedExpr::e_int(1)),
-                    UntypedStatement::assign("b", UntypedExpr::e_int(2))
+                    UntypedStatement::assign("a", None, UntypedExpr::e_int(1)),
+                    UntypedStatement::assign("b", None, UntypedExpr::e_int(2))
                 ]
             ))
         );
@@ -1002,10 +1123,11 @@ mod tests {
             Ok((
                 "",
                 vec![
-                    UntypedStatement::assign("a", UntypedExpr::e_int(1)),
-                    UntypedStatement::assign("b", UntypedExpr::e_int(2)),
+                    UntypedStatement::assign("a", None, UntypedExpr::e_int(1)),
+                    UntypedStatement::assign("b", None, UntypedExpr::e_int(2)),
                     UntypedStatement::assign(
                         "main",
+                        None,
                         UntypedExpr::bin_op("+", UntypedExpr::e_var("a"), UntypedExpr::e_var("b"))
                     )
                 ]
@@ -1019,36 +1141,34 @@ mod tests {
             dot_expr("3.inc"),
             Ok((
                 "",
-                UntypedExpr::fun_app(UntypedExpr::e_var("inc"), UntypedExpr::e_int(3))
+                UntypedExpr::e_method(UntypedExpr::e_int(3), "inc", vec![])
             ))
         );
         assert_eq!(
             dot_expr("3.inc()"),
             Ok((
                 "",
-                UntypedExpr::fun_app(UntypedExpr::e_var("inc"), UntypedExpr::e_int(3))
+                UntypedExpr::e_method(UntypedExpr::e_int(3), "inc", vec![]),
             ))
         );
         assert_eq!(
             dot_expr("3.add(2)"),
             Ok((
                 "",
-                UntypedExpr::fun_app(
-                    UntypedExpr::fun_app(UntypedExpr::e_var("add"), UntypedExpr::e_int(2)),
-                    UntypedExpr::e_int(3)
-                )
+                UntypedExpr::e_method(UntypedExpr::e_int(3), "add", vec![UntypedExpr::e_int(2)]),
             ))
         );
         assert_eq!(
             dot_expr("add(2, 3).inc"),
             Ok((
                 "",
-                UntypedExpr::fun_app(
-                    UntypedExpr::e_var("inc"),
+                UntypedExpr::e_method(
                     UntypedExpr::fun_app(
                         UntypedExpr::fun_app(UntypedExpr::e_var("add"), UntypedExpr::e_int(2)),
                         UntypedExpr::e_int(3)
-                    )
+                    ),
+                    "inc",
+                    vec![]
                 )
             ))
         );
@@ -1056,27 +1176,27 @@ mod tests {
             dot_expr("3.add(2).add(4)"),
             Ok((
                 "",
-                UntypedExpr::fun_app(
-                    UntypedExpr::fun_app(UntypedExpr::e_var("add"), UntypedExpr::e_int(4)),
-                    UntypedExpr::fun_app(
-                        UntypedExpr::fun_app(UntypedExpr::e_var("add"), UntypedExpr::e_int(2)),
-                        UntypedExpr::e_int(3)
-                    )
-                )
+                UntypedExpr::e_method(
+                    UntypedExpr::e_method(
+                        UntypedExpr::e_int(3),
+                        "add",
+                        vec![UntypedExpr::e_int(2)]
+                    ),
+                    "add",
+                    vec![UntypedExpr::e_int(4)]
+                ),
             ))
         );
         assert_eq!(
             dot_expr("3.add {2;}"),
             Ok((
                 "",
-                UntypedExpr::fun_app(
-                    UntypedExpr::fun_app(
-                        UntypedExpr::e_var("add"),
-                        UntypedExpr::e_block_expr(vec![UntypedStatementOrExpr::expr(
-                            UntypedExpr::e_int(2)
-                        )])
-                    ),
-                    UntypedExpr::e_int(3)
+                UntypedExpr::e_method(
+                    UntypedExpr::e_int(3),
+                    "add",
+                    vec![UntypedExpr::e_block_expr(vec![
+                        UntypedStatementOrExpr::expr(UntypedExpr::e_int(2))
+                    ])]
                 )
             ))
         );
@@ -1084,14 +1204,12 @@ mod tests {
             dot_expr("3.add() {2;}"),
             Ok((
                 "",
-                UntypedExpr::fun_app(
-                    UntypedExpr::fun_app(
-                        UntypedExpr::e_var("add"),
-                        UntypedExpr::e_block_expr(vec![UntypedStatementOrExpr::expr(
-                            UntypedExpr::e_int(2)
-                        )])
-                    ),
-                    UntypedExpr::e_int(3)
+                UntypedExpr::e_method(
+                    UntypedExpr::e_int(3),
+                    "add",
+                    vec![UntypedExpr::e_block_expr(vec![
+                        UntypedStatementOrExpr::expr(UntypedExpr::e_int(2))
+                    ])]
                 )
             ))
         );
@@ -1103,6 +1221,13 @@ mod tests {
             lambda_fn("fn x -> x"),
             Ok(("", UntypedExpr::e_fun("x", UntypedExpr::e_var("x"))))
         );
+        assert_eq!(
+            lambda_fn("fn x,y -> x"),
+            Ok((
+                "",
+                UntypedExpr::e_fun("x", UntypedExpr::e_fun("y", UntypedExpr::e_var("x")))
+            ))
+        )
     }
 
     #[test]
@@ -1194,5 +1319,42 @@ mod tests {
                 )
             ))
         );
+    }
+
+    #[test]
+    fn test_parser_at() {
+        assert_eq!(
+            parser_expr("a[0]"),
+            Ok((
+                "",
+                UntypedExpr::e_method(UntypedExpr::e_var("a"), "at", vec![UntypedExpr::e_int(0)])
+            ))
+        );
+        assert_eq!(
+            parser_expr("[1, 2, 3][0]"),
+            Ok((
+                "",
+                UntypedExpr::e_method(
+                    UntypedExpr::e_vector(vec![
+                        UntypedExpr::e_int(1),
+                        UntypedExpr::e_int(2),
+                        UntypedExpr::e_int(3)
+                    ]),
+                    "at",
+                    vec![UntypedExpr::e_int(0)]
+                )
+            ))
+        );
+        assert_eq!(
+            parser_expr(r#""hogehoge"[0]"#),
+            Ok((
+                "",
+                UntypedExpr::e_method(
+                    UntypedExpr::string("hogehoge"),
+                    "at",
+                    vec![UntypedExpr::e_int(0)]
+                )
+            ))
+        )
     }
 }

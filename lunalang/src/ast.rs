@@ -1,4 +1,4 @@
-use crate::types::Type;
+use crate::types::{HashableType, Type};
 
 #[derive(PartialEq, Eq, Debug, Clone)]
 pub enum Expr_<Ty, Span> {
@@ -10,7 +10,7 @@ pub enum Expr_<Ty, Span> {
         Box<Expr<Ty, Span>>,
         Box<Expr<Ty, Span>>,
     ),
-    EVar(String),
+    EVar(Ident),
     EFun(String, Box<Expr<Ty, Span>>),
     EFunApp(Box<Expr<Ty, Span>>, Box<Expr<Ty, Span>>),
     EString(String),
@@ -21,6 +21,20 @@ pub enum Expr_<Ty, Span> {
         Box<Expr<Ty, Span>>,
         Vec<(Pattern<Ty, Span>, Expr<Ty, Span>)>,
     ),
+    EMethod(Box<Expr<Ty, Span>>, Ident, Vec<Expr<Ty, Span>>),
+}
+
+#[derive(PartialEq, Eq, Debug, Clone, Hash)]
+pub enum Path {
+    Root,
+    Module(Box<Path>, String),
+    TypeModule(Box<Path>, HashableType),
+}
+
+#[derive(PartialEq, Eq, Debug, Clone)]
+pub struct Ident {
+    pub path: Option<Path>,
+    pub name: String,
 }
 
 pub type Expr<Ty, Span> = Annot<Ty, Span, Expr_<Ty, Span>>;
@@ -69,7 +83,10 @@ impl UntypedExpr {
         Annot {
             ty: (),
             span: (),
-            inner: Expr_::EVar(str.to_string()),
+            inner: Expr_::EVar(Ident {
+                path: None,
+                name: str.to_owned(),
+            }),
         }
     }
 
@@ -117,6 +134,20 @@ impl UntypedExpr {
             inner: Expr_::EUnary(op.to_string(), Box::new(e)),
         }
     }
+    pub fn e_method(receiver: Self, ident: &str, args: Vec<Self>) -> Self {
+        Annot {
+            ty: (),
+            span: (),
+            inner: Expr_::EMethod(
+                Box::new(receiver),
+                Ident {
+                    path: None,
+                    name: ident.to_owned(),
+                },
+                args,
+            ),
+        }
+    }
 }
 
 pub type TypedExpr = Expr<Type, ()>;
@@ -131,7 +162,7 @@ pub struct Annot<Ty, Span, Inner> {
 #[derive(PartialEq, Eq, Debug, Clone)]
 pub enum Pattern_<Ty, Span> {
     PValue(Expr<Ty, Span>),
-    PConstructor(String, Vec<Pattern<Ty, Span>>),
+    PConstructor(Ident, Vec<Pattern<Ty, Span>>),
     PVar(String),
 }
 
@@ -151,7 +182,13 @@ impl UntypedPattern {
         Annot {
             ty: (),
             span: (),
-            inner: Pattern_::PConstructor(name.to_string(), v),
+            inner: Pattern_::PConstructor(
+                Ident {
+                    path: None,
+                    name: name.to_string(),
+                },
+                v,
+            ),
         }
     }
     pub fn p_var(name: &str) -> Self {
@@ -167,7 +204,7 @@ pub type TypedPattern = Pattern<Type, ()>;
 
 #[derive(PartialEq, Eq, Debug, Clone)]
 pub enum Statement_<Ty, Span> {
-    Assign(String, Expr<Ty, Span>),
+    Assign(String, Option<Type>, Expr<Ty, Span>),
     TypeDef(String, Vec<ConstructorDef>),
 }
 
@@ -175,11 +212,11 @@ pub type Statement<Ty, Span> = Annot<(), Span, Statement_<Ty, Span>>;
 pub type UntypedStatement = Statement<(), ()>;
 
 impl UntypedStatement {
-    pub fn assign(name: &str, e: UntypedExpr) -> Self {
+    pub fn assign(name: &str, ty: Option<Type>, e: UntypedExpr) -> Self {
         Annot {
             ty: (),
             span: (),
-            inner: Statement_::Assign(name.to_string(), e),
+            inner: Statement_::Assign(name.to_string(), ty, e),
         }
     }
     pub fn type_def(name: &str, v: Vec<ConstructorDef>) -> Self {

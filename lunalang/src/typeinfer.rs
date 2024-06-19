@@ -1,10 +1,10 @@
 use crate::ast::{
-    Annot, ConstructorDef, Expr_, Pattern_, StatementOrExpr_, Statement_, TypedExpr, TypedPattern,
-    TypedStatement, TypedStatements, UntypedExpr, UntypedPattern, UntypedStatement,
+    Annot, ConstructorDef, Expr_, Ident, Path, Pattern_, StatementOrExpr_, Statement_, TypedExpr,
+    TypedPattern, TypedStatement, TypedStatements, UntypedExpr, UntypedPattern, UntypedStatement,
     UntypedStatements,
 };
 use crate::error::TypeInferError;
-use crate::types::Type;
+use crate::types::{HashableType, Type};
 use std::collections::HashMap;
 use std::{cell::RefCell, rc::Rc};
 
@@ -23,15 +23,15 @@ impl TypeEnv {
             builtin: TypeEnv::builtin(),
         }
     }
-    pub fn get(&self, name: &str) -> Result<Type, TypeInferError> {
-        match self.env.get(name) {
+    pub fn get(&self, ident: &Ident) -> Result<Type, TypeInferError> {
+        match self.env.get(&ident.name) {
             Some(ty) => Ok(ty.clone()),
             None => match &self.outer {
-                None => match self.builtin.get(name) {
+                None => match self.builtin.get(&ident.name) {
                     Some(ty) => Ok(ty.clone()),
-                    None => Err(TypeInferError::UndefinedVariable(name.to_owned())),
+                    None => Err(TypeInferError::UndefinedVariable(ident.name.to_owned())),
                 },
-                Some(env) => env.borrow().get(name),
+                Some(env) => env.borrow().get(ident),
             },
         }
     }
@@ -132,37 +132,210 @@ impl TypeToTypeEnv {
         builtin.insert("String".to_owned(), Type::ttype("String"));
         builtin.insert("Bool".to_owned(), Type::ttype("Bool"));
         builtin.insert("()".to_owned(), Type::ttype("()"));
+        builtin.insert("Char".to_owned(), Type::ttype("Char"));
         builtin
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModuleEnv {
+    module_env: HashMap<Path, Rc<RefCell<TypeEnv>>>,
+    type_module_env: HashMap<HashableType, Rc<RefCell<TypeEnv>>>,
+    type_to_path: HashMap<HashableType, Path>,
+}
+
+impl ModuleEnv {
+    pub fn new() -> Self {
+        let (module_env, type_module_env, type_to_path) = Self::builtin();
+        ModuleEnv {
+            module_env,
+            type_module_env,
+            type_to_path,
+        }
+    }
+    pub fn get(&self, ident: &Ident, default_module: &Path) -> Result<Type, TypeInferError> {
+        let path = match ident.path {
+            Some(ref path) => path,
+            None => default_module,
+        };
+        // todo: 相対pathの扱いをどうするか
+        match self.module_env.get(path) {
+            Some(env) => env.borrow().get(&ident),
+            None => Err(TypeInferError::UndefinedVariable(ident.name.to_owned())),
+        }
+    }
+    fn get_module(&self, path: &Path) -> Result<Rc<RefCell<TypeEnv>>, TypeInferError> {
+        match self.module_env.get(path) {
+            Some(env) => Ok(Rc::clone(env)),
+            None => Err(TypeInferError::ModuleNotFound(path.clone())),
+        }
+    }
+    // HashMapの要素のタプルの１つ目の要素はTypeModuleの型
+    pub fn search_from_current_module_and_type_modules(
+        &self,
+        ident: &Ident,
+        current_module: &Path,
+    ) -> Result<HashMap<Path, (Option<Type>, Type)>, TypeInferError> {
+        let mut result: HashMap<Path, (Option<Type>, Type)> = HashMap::new();
+        match self.get_module(&current_module)?.borrow().get(&ident) {
+            Ok(ty) => {
+                result.insert(current_module.clone(), (None, ty.clone()));
+            }
+            Err(_) => (),
+        }
+        for (hashable_ty, env) in self.type_module_env.iter() {
+            match env.borrow().get(&ident) {
+                Ok(ty) => {
+                    result.insert(
+                        self.type_to_path[hashable_ty].clone(),
+                        (Some(Type::from(hashable_ty.clone())), ty.clone()),
+                    );
+                }
+                Err(_) => (),
+            }
+        }
+        if result.len() == 0 {
+            return Err(TypeInferError::UndefinedVariable(ident.name.to_owned()));
+        }
+        Ok(result)
+    }
+    pub fn new_enclosed_env(
+        env: Rc<RefCell<ModuleEnv>>,
+        current_module: &Path,
+    ) -> Result<Self, TypeInferError> {
+        let mut new_env = env.borrow().clone();
+        match new_env.module_env.get(current_module) {
+            Some(env) => {
+                new_env.module_env.insert(
+                    current_module.clone(),
+                    Rc::new(RefCell::new(TypeEnv::new_enclosed_env(Rc::clone(env)))),
+                );
+            }
+            None => {
+                return Err(TypeInferError::ModuleNotFound(current_module.clone()));
+            }
+        }
+        Ok(new_env)
+    }
+    fn builtin() -> (
+        HashMap<Path, Rc<RefCell<TypeEnv>>>,
+        HashMap<HashableType, Rc<RefCell<TypeEnv>>>,
+        HashMap<HashableType, Path>,
+    ) {
+        let mut builtin_module_env = HashMap::new();
+        let mut builtin_type_module_env = HashMap::new();
+        let mut builtin_type_to_path = HashMap::new();
+
+        // ::main
+        builtin_module_env.insert(
+            Path::Module(Box::new(Path::Root), "main".to_owned()),
+            Rc::new(RefCell::new(TypeEnv::new())),
+        );
+
+        // ::Vector[a]
+        let mut vector_env = TypeEnv::new();
+        vector_env.insert(
+            "at".to_owned(),
+            Type::fun(
+                Type::ttype("Int"),
+                Type::fun(Type::TVector(Box::new(Type::TQVar(0))), Type::TQVar(0)),
+            ),
+        );
+        vector_env.insert(
+            "length".to_owned(),
+            Type::fun(Type::TVector(Box::new(Type::TQVar(0))), Type::ttype("Int")),
+        );
+        let vector_env = Rc::new(RefCell::new(vector_env));
+        builtin_type_module_env.insert(
+            HashableType::TVector(Box::new(HashableType::TQVar(0))),
+            Rc::clone(&vector_env),
+        );
+        builtin_module_env.insert(
+            Path::TypeModule(
+                Box::new(Path::Root),
+                HashableType::TVector(Box::new(HashableType::TQVar(0))),
+            ),
+            vector_env,
+        );
+        builtin_type_to_path.insert(
+            HashableType::TVector(Box::new(HashableType::TQVar(0))),
+            Path::TypeModule(
+                Box::new(Path::Root),
+                HashableType::TVector(Box::new(HashableType::TQVar(0))),
+            ),
+        );
+
+        // ::String
+        let mut string_env = TypeEnv::new();
+        string_env.insert(
+            "at".to_owned(),
+            Type::fun(
+                Type::ttype("Int"),
+                Type::fun(Type::ttype("String"), Type::ttype("Char")),
+            ),
+        );
+        string_env.insert(
+            "length".to_owned(),
+            Type::fun(Type::ttype("String"), Type::ttype("Int")),
+        );
+        let string_env = Rc::new(RefCell::new(string_env));
+        builtin_type_module_env.insert(
+            HashableType::TType("String".to_owned()),
+            Rc::clone(&string_env),
+        );
+        builtin_module_env.insert(
+            Path::TypeModule(
+                Box::new(Path::Root),
+                HashableType::TType("String".to_owned()),
+            ),
+            string_env,
+        );
+        builtin_type_to_path.insert(
+            HashableType::TType("String".to_owned()),
+            Path::TypeModule(
+                Box::new(Path::Root),
+                HashableType::TType("String".to_owned()),
+            ),
+        );
+        (
+            builtin_module_env,
+            builtin_type_module_env,
+            builtin_type_to_path,
+        )
+    }
+}
+
 pub struct TypeInfer {
-    env: Rc<RefCell<TypeEnv>>,
+    env: Rc<RefCell<ModuleEnv>>,
     type_to_type_env: Rc<RefCell<TypeToTypeEnv>>,
     unassigned_num: u64,
     level: u64,
+    current_module: Path,
 }
 
 impl TypeInfer {
     pub fn new() -> Self {
         TypeInfer {
-            env: Rc::new(RefCell::new(TypeEnv::new())),
+            env: Rc::new(RefCell::new(ModuleEnv::new())),
             type_to_type_env: Rc::new(RefCell::new(TypeToTypeEnv::new())),
             unassigned_num: 0,
             level: 0,
+            current_module: Path::Module(Box::new(Path::Root), "main".to_owned()),
         }
     }
     fn from(
-        env: TypeEnv,
+        env: ModuleEnv,
         type_to_type_env: TypeToTypeEnv,
         unassigned_num: u64,
         level: u64,
+        current_module: Path,
     ) -> Self {
         TypeInfer {
             env: Rc::new(RefCell::new(env)),
             type_to_type_env: Rc::new(RefCell::new(type_to_type_env)),
             unassigned_num,
             level,
+            current_module,
         }
     }
     pub fn newTVar(&mut self) -> Type {
@@ -174,7 +347,11 @@ impl TypeInfer {
         self.unassigned_num += 1;
         ty
     }
-    pub fn typeinfer_expr(&mut self, ast: &UntypedExpr) -> Result<TypedExpr, TypeInferError> {
+    pub fn typeinfer_expr(
+        &mut self,
+        ast: &UntypedExpr,
+        type_restriction: Option<Type>,
+    ) -> Result<TypedExpr, TypeInferError> {
         match &ast.inner {
             Expr_::EInt(n) => Ok(Annot {
                 ty: Type::ttype("Int"),
@@ -183,9 +360,9 @@ impl TypeInfer {
             }),
             Expr_::EBinOp(op, e1, e2) => match &op as &str {
                 "+" | "-" | "*" | "/" | "%" => {
-                    let e1 = self.typeinfer_expr(&e1)?;
+                    let e1 = self.typeinfer_expr(&e1, None)?;
                     unify(&Type::ttype("Int"), &e1.ty)?;
-                    let e2 = self.typeinfer_expr(&e2)?;
+                    let e2 = self.typeinfer_expr(&e2, None)?;
                     unify(&Type::ttype("Int"), &e2.ty)?;
                     Ok(Annot {
                         ty: Type::ttype("Int"),
@@ -194,9 +371,9 @@ impl TypeInfer {
                     })
                 }
                 "<" | ">" | "<=" | ">=" | "==" | "!=" => {
-                    let e1 = self.typeinfer_expr(&e1)?;
+                    let e1 = self.typeinfer_expr(&e1, None)?;
                     unify(&Type::ttype("Int"), &e1.ty)?;
-                    let e2 = self.typeinfer_expr(&e2)?;
+                    let e2 = self.typeinfer_expr(&e2, None)?;
                     unify(&Type::ttype("Int"), &e2.ty)?;
                     Ok(Annot {
                         ty: Type::ttype("Bool"),
@@ -206,9 +383,9 @@ impl TypeInfer {
                 }
                 ":=" => {
                     let ty = self.newTVar();
-                    let e1 = self.typeinfer_expr(&e1)?;
+                    let e1 = self.typeinfer_expr(&e1, None)?;
                     unify(&Type::TRef(Box::new(ty.clone())), &e1.ty)?;
-                    let e2 = self.typeinfer_expr(&e2)?;
+                    let e2 = self.typeinfer_expr(&e2, None)?;
                     unify(&ty, &e2.ty)?;
                     Ok(Annot {
                         ty: Type::ttype("()"),
@@ -219,10 +396,10 @@ impl TypeInfer {
                 _ => Err(TypeInferError::UnimplementedOperatorError(op.clone())),
             },
             Expr_::EIf(cond, e1, e2) => {
-                let cond = self.typeinfer_expr(&cond)?;
+                let cond = self.typeinfer_expr(&cond, None)?;
                 unify(&Type::ttype("Bool"), &cond.ty)?;
-                let e1 = self.typeinfer_expr(&e1)?;
-                let e2 = self.typeinfer_expr(&e2)?;
+                let e1 = self.typeinfer_expr(&e1, None)?;
+                let e2 = self.typeinfer_expr(&e2, None)?;
                 unify(&e1.ty, &e2.ty)?;
                 Ok(Annot {
                     ty: e1.ty.clone(),
@@ -231,7 +408,7 @@ impl TypeInfer {
                 })
             }
             Expr_::EVar(ident) => {
-                let ty = self.env.borrow().get(&ident)?;
+                let ty = self.env.borrow().get(&ident, &self.current_module)?;
                 Ok(Annot {
                     ty: self.instantiate(&ty),
                     span: (),
@@ -240,17 +417,27 @@ impl TypeInfer {
             }
             Expr_::EFun(arg, e) => {
                 let mut typeinfer = TypeInfer::from(
-                    TypeEnv::new_enclosed_env(Rc::clone(&self.env)),
+                    ModuleEnv::new_enclosed_env(Rc::clone(&self.env), &self.current_module)?,
                     TypeToTypeEnv::new_enclosed_env(Rc::clone(&self.type_to_type_env)),
                     self.unassigned_num,
                     self.level,
+                    self.current_module.clone(),
                 );
                 let ty = typeinfer.newTVar();
+                match type_restriction {
+                    Some(type_restriction) => unify(
+                        &Type::TFun(Box::new(ty.clone()), Box::new(self.newTVar())),
+                        &type_restriction,
+                    )?,
+                    None => (),
+                }
                 typeinfer
                     .env
+                    .borrow()
+                    .get_module(&self.current_module)?
                     .borrow_mut()
                     .insert(arg.to_string(), ty.clone());
-                let result = typeinfer.typeinfer_expr(&e)?;
+                let result = typeinfer.typeinfer_expr(&e, None)?;
                 self.unassigned_num = typeinfer.unassigned_num;
                 Ok(Annot {
                     ty: Type::fun(ty, result.ty.clone()),
@@ -259,8 +446,8 @@ impl TypeInfer {
                 })
             }
             Expr_::EFunApp(e1, e2) => {
-                let e1 = self.typeinfer_expr(&e1)?;
-                let e2 = self.typeinfer_expr(&e2)?;
+                let e1 = self.typeinfer_expr(&e1, None)?;
+                let e2 = self.typeinfer_expr(&e2, None)?;
                 let ty = self.newTVar();
                 unify(&e1.ty, &Type::fun(e2.ty.clone(), ty.clone()))?;
                 Ok(Annot {
@@ -281,17 +468,18 @@ impl TypeInfer {
             }),
             Expr_::EBlockExpr(asts) => {
                 let mut typeinfer = TypeInfer::from(
-                    TypeEnv::new_enclosed_env(Rc::clone(&self.env)),
+                    ModuleEnv::new_enclosed_env(Rc::clone(&self.env), &self.current_module)?,
                     TypeToTypeEnv::new_enclosed_env(Rc::clone(&self.type_to_type_env)),
                     self.unassigned_num,
                     self.level,
+                    self.current_module.clone(),
                 );
                 let mut result_asts = Vec::new();
                 if asts.len() > 1 {
                     for i in 0..(asts.len() - 1) {
                         match &asts[i].inner {
                             StatementOrExpr_::Expr(e) => {
-                                let e = typeinfer.typeinfer_expr(&e)?;
+                                let e = typeinfer.typeinfer_expr(&e, None)?;
                                 result_asts.push(Annot {
                                     ty: e.ty.clone(),
                                     span: (),
@@ -310,7 +498,7 @@ impl TypeInfer {
                 }
                 let ty = match &asts[asts.len() - 1].inner {
                     StatementOrExpr_::Expr(e) => {
-                        let e = typeinfer.typeinfer_expr(&e)?;
+                        let e = typeinfer.typeinfer_expr(&e, None)?;
                         result_asts.push(Annot {
                             ty: e.ty.clone(),
                             span: (),
@@ -340,7 +528,7 @@ impl TypeInfer {
                 let ty = self.newTVar();
                 let mut result_exprs = Vec::new();
                 for expr in exprs {
-                    let expr = self.typeinfer_expr(&expr)?;
+                    let expr = self.typeinfer_expr(&expr, None)?;
                     unify(&ty, &expr.ty.clone())?;
                     result_exprs.push(expr);
                 }
@@ -351,7 +539,7 @@ impl TypeInfer {
                 })
             }
             Expr_::EUnary(op, e) => {
-                let e = self.typeinfer_expr(&e)?;
+                let e = self.typeinfer_expr(&e, None)?;
                 match &op as &str {
                     "-" => {
                         unify(&Type::ttype("Int"), &e.ty)?;
@@ -384,7 +572,7 @@ impl TypeInfer {
                 }
             }
             Expr_::EMatch(expr, match_arms) => {
-                let match_expr = self.typeinfer_expr(&expr)?;
+                let match_expr = self.typeinfer_expr(&expr, None)?;
                 if match_arms.len() == 0 {
                     return Ok(Annot {
                         ty: match_expr.ty.clone(),
@@ -397,14 +585,15 @@ impl TypeInfer {
                 for (pattern, expr) in match_arms {
                     unify(&match_expr.ty, &self.peak_pattern(&pattern)?)?;
                     let mut typeinfer = TypeInfer::from(
-                        TypeEnv::new_enclosed_env(Rc::clone(&self.env)),
+                        ModuleEnv::new_enclosed_env(Rc::clone(&self.env), &self.current_module)?,
                         TypeToTypeEnv::new_enclosed_env(Rc::clone(&self.type_to_type_env)),
                         self.unassigned_num,
                         self.level,
+                        self.current_module.clone(),
                     );
                     let pattern = typeinfer
                         .typeinfer_pattern(&pattern, &match_expr.ty.unfold(&match_expr.ty))?;
-                    let expr = typeinfer.typeinfer_expr(&expr)?;
+                    let expr = typeinfer.typeinfer_expr(&expr, None)?;
                     unify(&result_ty, &expr.ty.clone())?;
                     result_match_arms.push((pattern, expr));
 
@@ -416,23 +605,96 @@ impl TypeInfer {
                     inner: Expr_::EMatch(Box::new(match_expr), result_match_arms),
                 })
             }
+            Expr_::EMethod(receiver, ident, args) => {
+                let receiver = self.typeinfer_expr(&receiver, None)?;
+                let receiver_ty = receiver.ty.simplify();
+                let args = args
+                    .iter()
+                    .map(|arg| self.typeinfer_expr(&arg, None))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let result_type = self.newTVar();
+                let mut ty = Type::fun(receiver.ty.simplify(), result_type.clone());
+                for arg in args.iter().rev() {
+                    ty = Type::fun(arg.ty.simplify(), ty)
+                }
+                let saved_ty = ty.simplify();
+                let envs = self
+                    .env
+                    .borrow()
+                    .search_from_current_module_and_type_modules(&ident, &self.current_module)?;
+                let mut candidate: Vec<(Path, Type)> = Vec::new();
+                let mut last_err = None;
+                for (path, (opt_ty, fun_type)) in envs {
+                    let fun_type = self.instantiate(&fun_type).simplify();
+                    let saved_fun_type = fun_type.clone();
+                    match unify(&fun_type, &ty) {
+                        Ok(_) => match opt_ty {
+                            Some(ty) => match unify(&self.instantiate(&ty), &receiver_ty) {
+                                Ok(_) => {
+                                    candidate.push((path, fun_type.simplify()));
+                                }
+                                Err(err) => {
+                                    last_err = Some(err);
+                                }
+                            },
+                            None => {
+                                candidate.push((path, fun_type.simplify()));
+                            }
+                        },
+                        Err(err) => {
+                            last_err = Some(err);
+                        }
+                    }
+                    saved_fun_type.reset();
+                    saved_ty.reset();
+                }
+                if candidate.len() == 0 {
+                    return Err(last_err.unwrap());
+                } else if candidate.len() >= 2 {
+                    return Err(TypeInferError::AmbiguousMethodCallError(
+                        ident.name.to_owned(),
+                        candidate
+                            .iter()
+                            .map(|(path, _)| path.clone())
+                            .collect::<Vec<_>>(),
+                    ));
+                }
+                let fun_type = &candidate[0].1;
+                unify(fun_type, &ty)?;
+                Ok(Annot {
+                    ty: result_type,
+                    span: (),
+                    inner: Expr_::EMethod(
+                        Box::new(receiver),
+                        Ident {
+                            path: Some(candidate[0].0.clone()),
+                            name: ident.name.clone(),
+                        },
+                        args,
+                    ),
+                })
+            }
         }
     }
-    fn typeinfer_expr_levelup(&mut self, ast: &UntypedExpr) -> Result<TypedExpr, TypeInferError> {
+    fn typeinfer_expr_levelup(
+        &mut self,
+        ast: &UntypedExpr,
+        type_restrict: Option<Type>,
+    ) -> Result<TypedExpr, TypeInferError> {
         self.level += 1;
-        let ty = self.typeinfer_expr(ast)?;
+        let ty = self.typeinfer_expr(ast, type_restrict)?;
         self.level -= 1;
         Ok(ty)
     }
 
     fn peak_pattern(&mut self, pattern: &UntypedPattern) -> Result<Type, TypeInferError> {
         match &pattern.inner {
-            Pattern_::PValue(e) => self.typeinfer_expr(&e).map(|e| e.ty),
+            Pattern_::PValue(e) => self.typeinfer_expr(&e, None).map(|e| e.ty),
             Pattern_::PConstructor(name, _) => {
                 let (_, ty) = self
                     .env
                     .borrow()
-                    .get(&name)?
+                    .get(&name, &self.current_module)?
                     .separate_to_args_and_resulttype();
                 Ok(ty)
             }
@@ -447,7 +709,7 @@ impl TypeInfer {
     ) -> Result<TypedPattern, TypeInferError> {
         match &pattern.inner {
             Pattern_::PValue(value) => {
-                let value = self.typeinfer_expr(&value)?;
+                let value = self.typeinfer_expr(&value, None)?;
                 unify(&value.ty, &ty)?;
                 Ok(Annot {
                     ty: value.ty.clone(),
@@ -456,7 +718,7 @@ impl TypeInfer {
                 })
             }
             Pattern_::PConstructor(name, patterns) => {
-                let args = ty.variant_to_type(&name)?;
+                let args = ty.variant_to_type(&name.name)?;
                 if args.len() != patterns.len() {
                     return Err(TypeInferError::InvalidArgumentPatternError(
                         args.len(),
@@ -480,7 +742,7 @@ impl TypeInfer {
                 let ty = ty.fold_variant();
                 let new_type = self.newTVar();
                 unify(&new_type, &ty)?;
-                self.env
+                self.env.borrow().module_env[&self.current_module]
                     .borrow_mut()
                     .insert(var_name.clone(), new_type.clone());
                 Ok(Annot {
@@ -497,16 +759,31 @@ impl TypeInfer {
         ast: &UntypedStatement,
     ) -> Result<TypedStatement, TypeInferError> {
         match &ast.inner {
-            Statement_::Assign(name, e) => {
-                let ty = self.newTVar();
-                self.env.borrow_mut().insert(name.to_string(), ty.clone());
-                let e = self.typeinfer_expr_levelup(&e)?;
+            Statement_::Assign(name, opt_ty, e) => {
+                let ty = match opt_ty {
+                    Some(ty) => ty.clone(),
+                    None => self.newTVar(),
+                };
+                self.env
+                    .borrow()
+                    .get_module(&self.current_module)?
+                    .borrow_mut()
+                    .insert(name.to_string(), ty.clone());
+                let instanciated_ty = self.instantiate(&ty);
+                let e = self.typeinfer_expr_levelup(
+                    &e,
+                    if opt_ty.is_some() {
+                        Some(instanciated_ty)
+                    } else {
+                        None
+                    },
+                )?;
                 unify(&ty, &e.ty)?;
                 self.generalize(&ty);
                 Ok(Annot {
                     ty: (),
                     span: (),
-                    inner: Statement_::Assign(name.to_string(), e),
+                    inner: Statement_::Assign(name.to_string(), opt_ty.clone(), e),
                 })
             }
             Statement_::TypeDef(type_name, constructor_def_vec) => {
@@ -542,19 +819,23 @@ impl TypeInfer {
                     .borrow_mut()
                     .insert(type_name.to_owned(), variant_type.clone())?;
                 for ConstructorDef { name, args } in constructor_def_vec {
-                    self.env.borrow_mut().insert(
-                        name.to_owned(),
-                        args.iter()
-                            .rev()
-                            .try_fold(variant_type.clone(), |acm, ty| {
-                                Ok(Type::fun(
-                                    self.replace_type(ty, |name| {
-                                        self.type_to_type_env.borrow().get(&name)
-                                    })?,
-                                    acm,
-                                ))
-                            })?,
-                    )
+                    self.env
+                        .borrow()
+                        .get_module(&self.current_module)?
+                        .borrow_mut()
+                        .insert(
+                            name.to_owned(),
+                            args.iter()
+                                .rev()
+                                .try_fold(variant_type.clone(), |acm, ty| {
+                                    Ok(Type::fun(
+                                        self.replace_type(ty, |name| {
+                                            self.type_to_type_env.borrow().get(&name)
+                                        })?,
+                                        acm,
+                                    ))
+                                })?,
+                        )
                 }
                 Ok(Annot {
                     ty: (),
@@ -773,7 +1054,13 @@ mod tests {
         assert_eq!(
             Rc::clone(&typeinfer.env)
                 .borrow()
-                .get(name)
+                .get(
+                    &Ident {
+                        path: None,
+                        name: name.to_string()
+                    },
+                    &Path::Module(Box::new(Path::Root), "main".to_string())
+                )
                 .map(|t| t.simplify()),
             ty
         )
@@ -802,11 +1089,13 @@ mod tests {
     #[case("&3", Ok(Type::TRef(Box::new(Type::ttype("Int")))))]
     #[case("*(&1)", Ok(Type::ttype("Int")))]
     #[case("&3:=4", Ok(Type::ttype("()")))]
+    #[case("[1, 2, 3][0]", Ok(Type::ttype("Int")))]
+    #[case(r#""hoge"[0]"#, Ok(Type::ttype("Char")))]
     fn test_typeinfer_expr(#[case] str: &str, #[case] ty: Result<Type, TypeInferError>) {
         let mut typeinfer = TypeInfer::new();
         assert_eq!(
             typeinfer
-                .typeinfer_expr(&parser_expr(str).unwrap().1)
+                .typeinfer_expr(&parser_expr(str).unwrap().1, None)
                 .map(|ty| ty.ty.simplify()),
             ty
         );
@@ -986,5 +1275,20 @@ mod tests {
     )]
     fn test_typeinfer_match(#[case] str: &str, #[case] ty: Result<Type, TypeInferError>) {
         typeinfer_statements_test_helper(str, "main", ty);
+    }
+
+    #[rstest]
+    #[case("let inc(n) = n + 1; let a = 3.inc;", "a", Ok(Type::ttype("Int")))]
+    #[case(
+        "let get(x: String): Char = x[0];",
+        "get",
+        Ok(Type::fun(Type::ttype("String"), Type::ttype("Char")))
+    )]
+    fn test_method_call(
+        #[case] str: &str,
+        #[case] name: &str,
+        #[case] ty: Result<Type, TypeInferError>,
+    ) {
+        typeinfer_statements_test_helper(str, name, ty);
     }
 }

@@ -1,3 +1,4 @@
+use crate::ast::Path;
 use crate::types::Type;
 use std::error::Error;
 use std::fmt;
@@ -14,6 +15,8 @@ pub enum TypeInferError {
     InvalidArgumentPatternError(usize, usize),
     VariantDoesNotHaveConstructor(Type, String),
     ExpectedVariatButGot(Type),
+    ModuleNotFound(Path),
+    AmbiguousMethodCallError(String, Vec<Path>),
 }
 
 impl Display for TypeInferError {
@@ -46,6 +49,16 @@ impl Display for TypeInferError {
             Self::TypeAlreadyDefined(name) => {
                 write!(f, "type error: type name {} is already used", name)
             }
+            Self::ModuleNotFound(path) => {
+                write!(f, "type error: module {:?} is not found", path)
+            }
+            Self::AmbiguousMethodCallError(name, paths) => {
+                write!(
+                    f,
+                    "type error: method call {} is ambiguous. candidates are {:?}",
+                    name, paths
+                )
+            }
         }
     }
 }
@@ -59,6 +72,7 @@ pub enum EvalError {
     UndefinedVariable(String),
     NotMatchAnyPattern,
     RecursionLimitExceeded,
+    ModuleNotFound(Path),
 }
 
 impl Display for EvalError {
@@ -76,6 +90,9 @@ impl Display for EvalError {
             }
             Self::RecursionLimitExceeded => {
                 write!(f, "recursion limit exceeded")
+            }
+            Self::ModuleNotFound(path) => {
+                write!(f, "eval error: module {:?} is not found", path)
             }
         }
     }
