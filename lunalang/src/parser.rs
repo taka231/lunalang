@@ -769,6 +769,21 @@ mod tests {
                 )
             ))
         );
+        assert_eq!(
+            parser_expr("if (1 < 2) 1 else if (2 < 3) 2 else 3"),
+            Ok((
+                "",
+                UntypedExpr::e_if(
+                    UntypedExpr::bin_op("<", UntypedExpr::e_int(1), UntypedExpr::e_int(2)),
+                    UntypedExpr::e_int(1),
+                    UntypedExpr::e_if(
+                        UntypedExpr::bin_op("<", UntypedExpr::e_int(2), UntypedExpr::e_int(3)),
+                        UntypedExpr::e_int(2),
+                        UntypedExpr::e_int(3),
+                    ),
+                ),
+            )),
+        );
     }
 
     #[test]
@@ -1206,6 +1221,13 @@ mod tests {
             lambda_fn("fn x -> x"),
             Ok(("", UntypedExpr::e_fun("x", UntypedExpr::e_var("x"))))
         );
+        assert_eq!(
+            lambda_fn("fn x,y -> x"),
+            Ok((
+                "",
+                UntypedExpr::e_fun("x", UntypedExpr::e_fun("y", UntypedExpr::e_var("x")))
+            ))
+        )
     }
 
     #[test]
@@ -1297,5 +1319,42 @@ mod tests {
                 )
             ))
         );
+    }
+
+    #[test]
+    fn test_parser_at() {
+        assert_eq!(
+            parser_expr("a[0]"),
+            Ok((
+                "",
+                UntypedExpr::e_method(UntypedExpr::e_var("a"), "at", vec![UntypedExpr::e_int(0)])
+            ))
+        );
+        assert_eq!(
+            parser_expr("[1, 2, 3][0]"),
+            Ok((
+                "",
+                UntypedExpr::e_method(
+                    UntypedExpr::e_vector(vec![
+                        UntypedExpr::e_int(1),
+                        UntypedExpr::e_int(2),
+                        UntypedExpr::e_int(3)
+                    ]),
+                    "at",
+                    vec![UntypedExpr::e_int(0)]
+                )
+            ))
+        );
+        assert_eq!(
+            parser_expr(r#""hogehoge"[0]"#),
+            Ok((
+                "",
+                UntypedExpr::e_method(
+                    UntypedExpr::string("hogehoge"),
+                    "at",
+                    vec![UntypedExpr::e_int(0)]
+                )
+            ))
+        )
     }
 }

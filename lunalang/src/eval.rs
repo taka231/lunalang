@@ -312,6 +312,18 @@ impl ModuleEnv {
                 2,
             ),
         );
+        vector_env.insert(
+            "length".to_owned(),
+            Value::VBuiltin(
+                "length".to_owned(),
+                |values, _| match &values[0] {
+                    Value::VVector(vec) => Ok(Value::VInt(vec.len() as i64)),
+                    _ => Err(EvalError::InternalTypeError),
+                },
+                vec![],
+                1,
+            ),
+        );
         builtin.insert(
             Path::TypeModule(
                 Box::new(Path::Root),
@@ -334,6 +346,18 @@ impl ModuleEnv {
                 },
                 vec![],
                 2,
+            ),
+        );
+        string_env.insert(
+            "length".to_owned(),
+            Value::VBuiltin(
+                "length".to_owned(),
+                |values, _| match &values[0] {
+                    Value::VString(str) => Ok(Value::VInt(str.len() as i64)),
+                    _ => Err(EvalError::InternalTypeError),
+                },
+                vec![],
+                1,
             ),
         );
         builtin.insert(

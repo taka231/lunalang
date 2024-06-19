@@ -241,6 +241,10 @@ impl ModuleEnv {
                 Type::fun(Type::TVector(Box::new(Type::TQVar(0))), Type::TQVar(0)),
             ),
         );
+        vector_env.insert(
+            "length".to_owned(),
+            Type::fun(Type::TVector(Box::new(Type::TQVar(0))), Type::ttype("Int")),
+        );
         let vector_env = Rc::new(RefCell::new(vector_env));
         builtin_type_module_env.insert(
             HashableType::TVector(Box::new(HashableType::TQVar(0))),
@@ -269,6 +273,10 @@ impl ModuleEnv {
                 Type::ttype("Int"),
                 Type::fun(Type::ttype("String"), Type::ttype("Char")),
             ),
+        );
+        string_env.insert(
+            "length".to_owned(),
+            Type::fun(Type::ttype("String"), Type::ttype("Int")),
         );
         let string_env = Rc::new(RefCell::new(string_env));
         builtin_type_module_env.insert(
@@ -1081,6 +1089,8 @@ mod tests {
     #[case("&3", Ok(Type::TRef(Box::new(Type::ttype("Int")))))]
     #[case("*(&1)", Ok(Type::ttype("Int")))]
     #[case("&3:=4", Ok(Type::ttype("()")))]
+    #[case("[1, 2, 3][0]", Ok(Type::ttype("Int")))]
+    #[case(r#""hoge"[0]"#, Ok(Type::ttype("Char")))]
     fn test_typeinfer_expr(#[case] str: &str, #[case] ty: Result<Type, TypeInferError>) {
         let mut typeinfer = TypeInfer::new();
         assert_eq!(
@@ -1265,5 +1275,20 @@ mod tests {
     )]
     fn test_typeinfer_match(#[case] str: &str, #[case] ty: Result<Type, TypeInferError>) {
         typeinfer_statements_test_helper(str, "main", ty);
+    }
+
+    #[rstest]
+    #[case("let inc(n) = n + 1; let a = 3.inc;", "a", Ok(Type::ttype("Int")))]
+    #[case(
+        "let get(x: String): Char = x[0];",
+        "get",
+        Ok(Type::fun(Type::ttype("String"), Type::ttype("Char")))
+    )]
+    fn test_method_call(
+        #[case] str: &str,
+        #[case] name: &str,
+        #[case] ty: Result<Type, TypeInferError>,
+    ) {
+        typeinfer_statements_test_helper(str, name, ty);
     }
 }

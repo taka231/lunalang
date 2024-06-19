@@ -74,7 +74,7 @@ pub fn repl() {
                 }
                 let result = repl.eval.eval_expr(ast.unwrap());
                 match result {
-                    Ok(e) => println!("{:?}", e),
+                    Ok(e) => println!("{}", e),
                     Err(err) => println!("{}", err),
                 }
             }
